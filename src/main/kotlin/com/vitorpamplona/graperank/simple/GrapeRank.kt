@@ -1,3 +1,5 @@
+package com.vitorpamplona.graperank.simple
+
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.exp

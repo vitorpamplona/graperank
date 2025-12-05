@@ -1,3 +1,5 @@
+package com.vitorpamplona.graperank.simple
+
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
