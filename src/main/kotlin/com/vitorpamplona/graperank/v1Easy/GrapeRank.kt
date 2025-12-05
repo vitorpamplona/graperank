@@ -1,4 +1,4 @@
-package com.vitorpamplona.graperank.simple
+package com.vitorpamplona.graperank.v1Easy
 
 import kotlin.math.abs
 import kotlin.math.max
@@ -16,7 +16,7 @@ class Follow(src: User): Relationship(src) {
 }
 
 class Mute(src: User): Relationship(src) {
-    override fun rating() =  0.0
+    override fun rating() = 0.0
     override fun confidence(observer: User): Double = 0.4
 }
 

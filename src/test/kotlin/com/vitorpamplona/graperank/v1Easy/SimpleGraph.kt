@@ -1,4 +1,4 @@
-package com.vitorpamplona.graperank.simple
+package com.vitorpamplona.graperank.v1Easy
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
