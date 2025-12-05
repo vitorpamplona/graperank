@@ -88,12 +88,12 @@ class Graph() {
         do {
             var hasChanged = false
 
-            fromUser.incomingEdges.forEach { newTarget ->
+            for (newTarget in fromUser.incomingEdges) {
                 val changed = updateScore(newTarget.src, observer)
                 hasChanged = hasChanged || changed
             }
 
-            fromUser.outgoingEdges.forEach { newTarget ->
+            for (newTarget in fromUser.outgoingEdges) {
                 val changed = updateScore(newTarget, observer)
                 hasChanged = hasChanged || changed
             }
@@ -110,11 +110,11 @@ class Graph() {
         val hasChanged = abs(newScore - currentScore) > 0.0001
 
         if (hasChanged) {
-            target.incomingEdges.forEach { newTarget ->
+            for (newTarget in target.incomingEdges) {
                 updateScore(newTarget.src, observer)
             }
 
-            target.outgoingEdges.forEach { newTarget ->
+            for (newTarget in target.outgoingEdges) {
                 updateScore(newTarget, observer)
             }
         }
