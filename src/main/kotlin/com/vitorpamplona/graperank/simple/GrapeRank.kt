@@ -26,7 +26,7 @@ class Report(src: User): Relationship(src) {
 }
 
 class User {
-    var incomingEdges = mutableListOf<Relationship>()
+    val incomingEdges = mutableListOf<Relationship>()
 
     infix fun follows(user: User) = user.incomingEdges.add(Follow(this))
     infix fun reports(user: User) = user.incomingEdges.add(Report(this))
