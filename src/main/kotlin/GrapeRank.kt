@@ -26,14 +26,14 @@ class Report(src: User): Relationship(src) {
 class User {
     var incomingEdges = mutableListOf<Relationship>()
 
-    fun follow(user: User) = user.incomingEdges.add(Follow(this))
-    fun report(user: User) = user.incomingEdges.add(Report(this))
-    fun mute(user: User) = user.incomingEdges.add(Mute(this))
+    infix fun follows(user: User) = user.incomingEdges.add(Follow(this))
+    infix fun reports(user: User) = user.incomingEdges.add(Report(this))
+    infix fun mutes(user: User) = user.incomingEdges.add(Mute(this))
 }
 
-fun weightToConfidence(weights: Double, rigor: Double = 0.5) = 1.0 - exp(-weights * -ln(rigor))
+fun weightToConfidence(weight: Double, rigor: Double = 0.5) = 1.0 - exp(-weight * -ln(rigor))
 
-fun computePageRank(users: List<User>, observer: User) =
+fun grapeRank(users: List<User>, observer: User) =
     mutableMapOf(observer to 1.0).apply {
         do {
             var doAnotherRound = false

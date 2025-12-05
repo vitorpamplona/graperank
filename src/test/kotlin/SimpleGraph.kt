@@ -11,13 +11,13 @@ class SimpleGraph {
 
         val users = listOf(alice, bob, charlie, david)
 
-        alice.follow(bob)
-        bob.follow(david)
-        bob.follow(charlie)
-        david.mute(charlie)
-        alice.report(charlie)
+        alice follows bob
+        bob follows david
+        bob follows charlie
+        david mutes charlie
+        alice reports charlie
 
-        val scores = computePageRank(users, alice)
+        val scores = grapeRank(users, alice)
 
         assertEquals(1.0, scores[alice])
         assertEquals(0.05394235327440411, scores[bob])
