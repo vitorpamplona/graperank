@@ -33,30 +33,30 @@ class Report(src: User): Relationship(src) {
  */
 open class User() {
     // followers, mutedBy and reportedBy
-    val incomingEdges = mutableListOf<Relationship>()
+    val inEdges = mutableListOf<Relationship>()
     // my follows, mutes and reports
-    val outgoingEdges = mutableListOf<User>()
+    val outEdges = mutableListOf<User>()
     // scores from this user's standpoint
     val scores = mutableMapOf<User, Double>(this to 1.0)
 
     context(graph: Graph)
     infix fun follows(user: User) {
-        outgoingEdges.add(user)
-        user.incomingEdges.add(Follow(this))
+        outEdges.add(user)
+        user.inEdges.add(Follow(this))
         graph.computeScoresFrom(user)
     }
 
     context(graph: Graph)
     infix fun reports(user: User) {
-        outgoingEdges.add(user)
-        user.incomingEdges.add(Report(this))
+        outEdges.add(user)
+        user.inEdges.add(Report(this))
         graph.computeScoresFrom(user)
     }
 
     context(graph: Graph)
     infix fun mutes(user: User) {
-        outgoingEdges.add(user)
-        user.incomingEdges.add(Mute(this))
+        outEdges.add(user)
+        user.inEdges.add(Mute(this))
         graph.computeScoresFrom(user)
     }
 }
@@ -76,7 +76,6 @@ class Graph() {
 
     fun makeObserver(observer: User) {
         observers.add(observer)
-        // this will create the entire graph from the observer's point
         updateScores(observer, observer)
     }
 
@@ -88,18 +87,16 @@ class Graph() {
 
     fun updateScores(target: User, observer: User) {
         if (target == observer) {
-            // special case
-            // since the score is always 1, it never changes
-            // so the algo should stop when the outgoing edges
-            // stop changing.
-            for (newTarget in target.outgoingEdges) {
+            // special case: score is always 1.
+            // no need to compute new score
+            for (newTarget in target.outEdges) {
                 updateScores(newTarget, observer)
             }
             return
         }
 
         while (observer.newScore(target)) {
-            for (newTarget in target.outgoingEdges) {
+            for (newTarget in target.outEdges) {
                 updateScores(newTarget, observer)
             }
         }
@@ -109,7 +106,7 @@ class Graph() {
         var weights = 0.0
         var ratings = 0.0
 
-        for (edge in target.incomingEdges) {
+        for (edge in target.inEdges) {
             val score = scores[edge.src] ?: continue
             val weight = edge.conf(this) * score
 
