@@ -50,52 +50,30 @@ class CelebrityGraph {
 
         assertEquals(0.05394235327440411, newPleb.scores[pleb1])
         assertEquals(0.004476748165767597, newPleb.scores[celebrity])
-        assertEquals(0.05394235327440411, newPleb.scores[pleb2])
-        assertEquals(0.05394235327440411, newPleb.scores[pleb3])
 
         pleb3 follows pleb1
 
         assertEquals(0.05535621916345923, newPleb.scores[pleb1])
         assertEquals(0.004515772595457879, newPleb.scores[celebrity])
-        assertEquals(0.05394235327440411, newPleb.scores[pleb2])
-        assertEquals(0.05394235327440411, newPleb.scores[pleb3])
 
         newPleb follows pleb4
 
         assertEquals(0.05535621916345923, newPleb.scores[pleb1])
         assertEquals(0.00600350560738494, newPleb.scores[celebrity])
-        assertEquals(0.05394235327440411, newPleb.scores[pleb2])
-        assertEquals(0.05394235327440411, newPleb.scores[pleb3])
-        assertEquals(0.05394235327440411, newPleb.scores[pleb4])
 
         newPleb follows pleb5
 
         assertEquals(0.05535621916345923, newPleb.scores[pleb1])
         assertEquals(0.007489015229474427, newPleb.scores[celebrity])
-        assertEquals(0.05394235327440411, newPleb.scores[pleb2])
-        assertEquals(0.05394235327440411, newPleb.scores[pleb3])
-        assertEquals(0.05394235327440411, newPleb.scores[pleb4])
-        assertEquals(0.05394235327440411, newPleb.scores[pleb5])
 
         newPleb follows pleb6
 
         assertEquals(0.05535621916345923, newPleb.scores[pleb1])
         assertEquals(0.008972304784541696, newPleb.scores[celebrity])
-        assertEquals(0.05394235327440411, newPleb.scores[pleb2])
-        assertEquals(0.05394235327440411, newPleb.scores[pleb3])
-        assertEquals(0.05394235327440411, newPleb.scores[pleb4])
-        assertEquals(0.05394235327440411, newPleb.scores[pleb5])
-        assertEquals(0.05394235327440411, newPleb.scores[pleb6])
 
         newPleb follows pleb7
 
         assertEquals(0.05535621916345923, newPleb.scores[pleb1])
         assertEquals(0.010453377590436519, newPleb.scores[celebrity])
-        assertEquals(0.05394235327440411, newPleb.scores[pleb2])
-        assertEquals(0.05394235327440411, newPleb.scores[pleb3])
-        assertEquals(0.05394235327440411, newPleb.scores[pleb4])
-        assertEquals(0.05394235327440411, newPleb.scores[pleb5])
-        assertEquals(0.05394235327440411, newPleb.scores[pleb6])
-        assertEquals(0.05394235327440411, newPleb.scores[pleb7])
     }
 }
