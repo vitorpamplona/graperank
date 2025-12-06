@@ -6,34 +6,36 @@ import kotlin.math.ln
 import kotlin.math.max
 
 sealed class Relationship(val src: User) {
-    abstract fun confidence(observer: User): Double
+    abstract fun conf(observer: User): Double
     abstract fun rating(): Double
 }
 
 class Follow(src: User): Relationship(src) {
     override fun rating() = 1.0
-    override fun confidence(observer: User): Double = if (observer == src) 0.08 else 0.04
+    override fun conf(observer: User): Double =
+        if (observer == src) 0.08 else 0.04
 }
 
 class Mute(src: User): Relationship(src) {
     override fun rating() = 0.0
-    override fun confidence(observer: User): Double = 0.4
+    override fun conf(observer: User): Double = 0.4
 }
 
 class Report(src: User): Relationship(src) {
     override fun rating() =  -0.1
-    override fun confidence(observer: User): Double = 0.4
+    override fun conf(observer: User): Double = 0.4
 }
 
 /**
- * User class that resembles the reality of having to store
- * scores and to constantly recompute them while offering
+ * User class that resembles the reality of
+ * having to store scores and to constantly
+ * recompute them while offering
  * an index to all neighborhood nodes.
  */
 open class User() {
-    // followers + mutedBy + reportedBy
+    // followers, mutedBy and reportedBy
     val incomingEdges = mutableListOf<Relationship>()
-    // following + mutes + reports (author only)
+    // my follows, mutes and reports
     val outgoingEdges = mutableListOf<User>()
     // scores from this user's standpoint
     val scores = mutableMapOf<User, Double>(this to 1.0)
@@ -61,62 +63,64 @@ open class User() {
 }
 
 /**
- * Stateful Graph chart to store users and observers
- * and recompute graperank when the graph changes
+ * Stateful Graph to store users and observers
+ * and recompute graperank when it changes
  *
- * The update algorithm only checks nearby users
- * after any update
+ * The update algorithm propagates forward
+ * until no more changes are found
  */
 class Graph() {
-    val users: MutableList<User> = mutableListOf()
-    val observers: MutableList<User> = mutableListOf()
+    val users  = mutableListOf<User>()
+    val observers = mutableListOf<User>()
 
-    fun newUser(): User = User().also { users.add(it) }
+    fun newUser() = User().also { users += it }
 
     fun makeObserver(observer: User) {
         observers.add(observer)
-        updateScore(observer, observer)
+        // this will create the entire graph from the observer's point
+        updateScores(observer, observer)
     }
 
     fun computeScoresFrom(user: User) {
         observers.forEach { observer ->
-            updateScore(user, observer)
+            updateScores(user, observer)
         }
     }
 
-    fun updateScore(target: User, observer: User) {
+    fun updateScores(target: User, observer: User) {
         if (target == observer) {
             // special case
             // since the score is always 1, it never changes
             // so the algo should stop when the outgoing edges
             // stop changing.
             for (newTarget in target.outgoingEdges) {
-                updateScore(newTarget, observer)
+                updateScores(newTarget, observer)
             }
-        } else {
-            do {
-                val newScore = nodeScore(target, observer)
-                val currentScore = observer.scores.put(target, newScore) ?: 0.0
-                val hasChanged = abs(newScore - currentScore) > 0.0001
-
-                if (hasChanged) {
-                    // the node's new scores will affect everyone the node follows/mutes
-                    for (newTarget in target.outgoingEdges) {
-                        updateScore(newTarget, observer)
-                    }
-                }
-            } while (hasChanged)
+            return
         }
+
+        do {
+            val newScore = score(target, observer)
+            val currentScore = observer.scores.put(target, newScore) ?: 0.0
+            val hasChanged = abs(newScore - currentScore) > 0.0001
+
+            if (hasChanged) {
+                // the node's new scores will affect everyone the node follows/mutes
+                for (newTarget in target.outgoingEdges) {
+                    updateScores(newTarget, observer)
+                }
+            }
+        } while (hasChanged)
     }
 
-    fun nodeScore(target: User, observer: User): Double {
+    fun score(target: User, observer: User): Double {
         var sumOfWeights = 0.0
         var sumOfWeightRating = 0.0
 
         for (edge in target.incomingEdges) {
-            val currentScore = observer.scores[edge.src] ?: continue
+            val score = observer.scores[edge.src] ?: continue
+            val weight = edge.conf(observer) * score
 
-            val weight = edge.confidence(observer) * currentScore
             sumOfWeights += weight
             sumOfWeightRating += weight * edge.rating()
         }
@@ -124,11 +128,12 @@ class Graph() {
         return if (abs(sumOfWeights) < 0.00001) {
             0.0
         } else {
-            max(weightToConfidence(sumOfWeights) * sumOfWeightRating / sumOfWeights, 0.0)
+            max(conf(sumOfWeights) * sumOfWeightRating / sumOfWeights, 0.0)
         }
     }
 
-    fun weightToConfidence(weight: Double, rigor: Double = 0.5) = 1.0 - exp(-weight * -ln(rigor))
+    fun conf(w: Double, rigor: Double = 0.5) =
+        1.0 - exp(-w * -ln(rigor))
 }
 
 
