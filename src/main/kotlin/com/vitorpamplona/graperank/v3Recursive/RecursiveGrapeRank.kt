@@ -21,7 +21,7 @@ class Mute(src: User): Relationship(src) {
 }
 
 class Report(src: User): Relationship(src) {
-    override fun rating() =  -0.1
+    override fun rating() = -0.1
     override fun conf(observer: User)= 0.4
 }
 
@@ -34,8 +34,10 @@ class Report(src: User): Relationship(src) {
 open class User() {
     // followers, mutedBy and reportedBy
     val inEdges = mutableListOf<Relationship>()
+
     // my follows, mutes and reports
     val outEdges = mutableListOf<User>()
+
     // scores from this user's standpoint
     val scores = mutableMapOf<User, Double>(
         this to 1.0
@@ -92,7 +94,7 @@ class Graph() {
         observer: User
     ) {
         if (target == observer) {
-            // special case: score is always 1.
+            // special case: score is always 1
             // no need to compute new score
             for (next in target.outEdges) {
                 updateScores(next, observer)
@@ -112,8 +114,8 @@ class Graph() {
         var ratings = 0.0
 
         for (edge in target.inEdges) {
-            val scr = scores[edge.src] ?: continue
-            val weight = edge.conf(this) * scr
+            val s = scores[edge.src] ?: continue
+            val weight = edge.conf(this) * s
 
             weights += weight
             ratings += weight * edge.rating()
@@ -127,8 +129,8 @@ class Graph() {
             score.coerceAtLeast(0.0)
         }
 
-        val current = scores.put(target, new) ?: 0.0
-        return abs(new - current) > 0.0001
+        val curr = scores.put(target, new) ?: 0.0
+        return abs(new - curr) > 0.0001
     }
 
     fun conf(w: Double, rigor: Double = 0.5) =
