@@ -11,18 +11,18 @@ sealed class Relationship(val src: User) {
 
 class Follow(src: User): Relationship(src) {
     override fun rating() = 1.0
-    override fun conf(observer: User): Double =
+    override fun conf(observer: User) =
         if (observer == src) 0.08 else 0.04
 }
 
 class Mute(src: User): Relationship(src) {
     override fun rating() = 0.0
-    override fun conf(observer: User): Double = 0.4
+    override fun conf(observer: User) = 0.4
 }
 
 class Report(src: User): Relationship(src) {
     override fun rating() =  -0.1
-    override fun conf(observer: User): Double = 0.4
+    override fun conf(observer: User)= 0.4
 }
 
 /**
@@ -112,8 +112,8 @@ class Graph() {
         var ratings = 0.0
 
         for (edge in target.inEdges) {
-            val score = scores[edge.src] ?: continue
-            val weight = edge.conf(this) * score
+            val scr = scores[edge.src] ?: continue
+            val weight = edge.conf(this) * scr
 
             weights += weight
             ratings += weight * edge.rating()
