@@ -32,7 +32,7 @@ class LinearGraph {
         assertEquals(null, center.scores[minus4hops])
         assertEquals(null, center.scores[minus3hops])
         assertEquals(null, center.scores[minus2hops])
-        assertEquals(0.0, center.scores[minus1hops])
+        assertEquals(null, center.scores[minus1hops])
         assertEquals(1.0, center.scores[center])
         assertEquals(0.05394235327440411, center.scores[plus1hops])
         assertEquals(0.001494481751665666, center.scores[plus2hops])
@@ -60,7 +60,7 @@ class LinearGraph {
         assertEquals(null, plus4hops.scores[center])
         assertEquals(null, plus4hops.scores[plus1hops])
         assertEquals(null, plus4hops.scores[plus2hops])
-        assertEquals(0.0, plus4hops.scores[plus3hops])
+        assertEquals(null, plus4hops.scores[plus3hops])
         assertEquals(1.0, plus4hops.scores[plus4hops])
     }
 }

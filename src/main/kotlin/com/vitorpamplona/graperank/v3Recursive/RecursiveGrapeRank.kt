@@ -42,21 +42,21 @@ open class User() {
     infix fun follows(user: User) {
         outgoingEdges.add(user)
         user.incomingEdges.add(Follow(this))
-        graph.computeScoresFrom(this)
+        graph.computeScoresFrom(user)
     }
 
     context(graph: Graph)
     infix fun reports(user: User) {
         outgoingEdges.add(user)
         user.incomingEdges.add(Report(this))
-        graph.computeScoresFrom(this)
+        graph.computeScoresFrom(user)
     }
 
     context(graph: Graph)
     infix fun mutes(user: User) {
         outgoingEdges.add(user)
         user.incomingEdges.add(Mute(this))
-        graph.computeScoresFrom(this)
+        graph.computeScoresFrom(user)
     }
 }
 
@@ -75,51 +75,38 @@ class Graph() {
 
     fun makeObserver(observer: User) {
         observers.add(observer)
-        updateGrapevine(observer, observer)
+        updateScore(observer, observer)
     }
 
     fun computeScoresFrom(user: User) {
         observers.forEach { observer ->
-            updateGrapevine(user, observer)
+            updateScore(user, observer)
         }
     }
 
-    fun updateGrapevine(fromUser: User, observer: User) {
-        do {
-            var hasChanged = false
-
-            for (newTarget in fromUser.incomingEdges) {
-                val changed = updateScore(newTarget.src, observer)
-                hasChanged = hasChanged || changed
-            }
-
-            for (newTarget in fromUser.outgoingEdges) {
-                val changed = updateScore(newTarget, observer)
-                hasChanged = hasChanged || changed
-            }
-        } while (hasChanged)
-    }
-
-    fun updateScore(target: User, observer: User): Boolean {
-        if (target == observer) return false
-
-        val newScore = nodeScore(target, observer)
-
-        val currentScore = observer.scores.put(target, newScore) ?: 0.0
-
-        val hasChanged = abs(newScore - currentScore) > 0.0001
-
-        if (hasChanged) {
-            for (newTarget in target.incomingEdges) {
-                updateScore(newTarget.src, observer)
-            }
-
+    fun updateScore(target: User, observer: User) {
+        if (target == observer) {
+            // special case
+            // since the score is always 1, it never changes
+            // so the algo should stop when the outgoing edges
+            // stop changing.
             for (newTarget in target.outgoingEdges) {
                 updateScore(newTarget, observer)
             }
-        }
+        } else {
+            do {
+                val newScore = nodeScore(target, observer)
+                val currentScore = observer.scores.put(target, newScore) ?: 0.0
+                val hasChanged = abs(newScore - currentScore) > 0.0001
 
-        return hasChanged
+                if (hasChanged) {
+                    // the node's new scores will affect everyone the node follows/mutes
+                    for (newTarget in target.outgoingEdges) {
+                        updateScore(newTarget, observer)
+                    }
+                }
+            } while (hasChanged)
+        }
     }
 
     fun nodeScore(target: User, observer: User): Double {
