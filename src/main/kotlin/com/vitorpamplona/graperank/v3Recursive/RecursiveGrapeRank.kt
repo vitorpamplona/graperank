@@ -37,7 +37,9 @@ open class User() {
     // my follows, mutes and reports
     val outEdges = mutableListOf<User>()
     // scores from this user's standpoint
-    val scores = mutableMapOf<User, Double>(this to 1.0)
+    val scores = mutableMapOf<User, Double>(
+        this to 1.0
+    )
 
     context(graph: Graph)
     infix fun follows(user: User) {
@@ -85,19 +87,22 @@ class Graph() {
         }
     }
 
-    fun updateScores(target: User, observer: User) {
+    fun updateScores(
+        target: User,
+        observer: User
+    ) {
         if (target == observer) {
             // special case: score is always 1.
             // no need to compute new score
-            for (newTarget in target.outEdges) {
-                updateScores(newTarget, observer)
+            for (next in target.outEdges) {
+                updateScores(next, observer)
             }
             return
         }
 
         while (observer.newScore(target)) {
-            for (newTarget in target.outEdges) {
-                updateScores(newTarget, observer)
+            for (next in target.outEdges) {
+                updateScores(next, observer)
             }
         }
     }
@@ -118,7 +123,7 @@ class Graph() {
             0.0
         } else {
             val conf = conf(weights)
-            val score = conf * ratings / weights
+            val score = conf * ratings/weights
             score.coerceAtLeast(0.0)
         }
 
