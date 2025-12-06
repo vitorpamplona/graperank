@@ -3,7 +3,6 @@ package com.vitorpamplona.graperank.v3Recursive
 import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.ln
-import kotlin.math.max
 
 sealed class Relationship(val src: User) {
     abstract fun conf(observer: User): Double
@@ -99,37 +98,35 @@ class Graph() {
             return
         }
 
-        do {
-            val newScore = score(target, observer)
-            val currentScore = observer.scores.put(target, newScore) ?: 0.0
-            val hasChanged = abs(newScore - currentScore) > 0.0001
-
-            if (hasChanged) {
-                // the node's new scores will affect everyone the node follows/mutes
-                for (newTarget in target.outgoingEdges) {
-                    updateScores(newTarget, observer)
-                }
+        while (observer.newScore(target)) {
+            for (newTarget in target.outgoingEdges) {
+                updateScores(newTarget, observer)
             }
-        } while (hasChanged)
+        }
     }
 
-    fun score(target: User, observer: User): Double {
-        var sumOfWeights = 0.0
-        var sumOfWeightRating = 0.0
+    fun User.newScore(target: User): Boolean {
+        var weights = 0.0
+        var ratings = 0.0
 
         for (edge in target.incomingEdges) {
-            val score = observer.scores[edge.src] ?: continue
-            val weight = edge.conf(observer) * score
+            val score = scores[edge.src] ?: continue
+            val weight = edge.conf(this) * score
 
-            sumOfWeights += weight
-            sumOfWeightRating += weight * edge.rating()
+            weights += weight
+            ratings += weight * edge.rating()
         }
 
-        return if (abs(sumOfWeights) < 0.00001) {
+        val new = if (abs(weights) < 0.00001) {
             0.0
         } else {
-            max(conf(sumOfWeights) * sumOfWeightRating / sumOfWeights, 0.0)
+            val conf = conf(weights)
+            val score = conf * ratings / weights
+            score.coerceAtLeast(0.0)
         }
+
+        val current = scores.put(target, new) ?: 0.0
+        return abs(new - current) > 0.0001
     }
 
     fun conf(w: Double, rigor: Double = 0.5) =
