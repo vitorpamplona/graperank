@@ -2,7 +2,6 @@ package com.vitorpamplona.graperank.v3Recursive
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.time.measureTime
 
 class LinearGraph {
     @Test
