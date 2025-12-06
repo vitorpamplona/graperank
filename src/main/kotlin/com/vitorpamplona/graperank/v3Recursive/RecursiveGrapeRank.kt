@@ -63,6 +63,12 @@ open class User() {
         user.inEdges.add(Mute(this))
         graph.computeScoresFrom(user)
     }
+
+    fun score(edge: Relationship) =
+        scores[edge.src]
+
+    fun score(user: User, value: Double) =
+        scores.put(user, value)
 }
 
 /**
@@ -114,7 +120,7 @@ class Graph() {
         var ratings = 0.0
 
         for (edge in target.inEdges) {
-            val s = scores[edge.src] ?: continue
+            val s = score(edge) ?: continue
             val weight = edge.conf(this) * s
 
             weights += weight
@@ -129,7 +135,7 @@ class Graph() {
             score.coerceAtLeast(0.0)
         }
 
-        val curr = scores.put(target, new) ?: 0.0
+        val curr = score(target, new) ?: 0.0
         return abs(new - curr) > 0.0001
     }
 
