@@ -86,7 +86,11 @@ class Graph() {
 
     fun makeObserver(observer: User) {
         observers.add(observer)
-        updateScores(observer, observer)
+        // the score of the observer is always
+        // 1, so propagate from all outEdges
+        for (next in observer.outEdges) {
+            updateScores(next, observer)
+        }
     }
 
     fun computeScoresFrom(user: User) {
@@ -99,14 +103,7 @@ class Graph() {
         target: User,
         observer: User
     ) {
-        if (target == observer) {
-            // special case: score is always 1
-            // no need to compute new score
-            for (next in target.outEdges) {
-                updateScores(next, observer)
-            }
-            return
-        }
+        if (target == observer) return
 
         while (observer.newScore(target)) {
             for (next in target.outEdges) {
@@ -115,13 +112,17 @@ class Graph() {
         }
     }
 
+    /**
+     * Computes a new score and returns if
+     * it is different from the past
+     */
     fun User.newScore(target: User): Boolean {
         var weights = 0.0
         var ratings = 0.0
 
         for (edge in target.inEdges) {
-            val s = score(edge) ?: continue
-            val weight = edge.conf(this) * s
+            val sc = score(edge) ?: continue
+            val weight = edge.conf(this) * sc
 
             weights += weight
             ratings += weight * edge.rating()
