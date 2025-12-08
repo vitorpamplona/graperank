@@ -31,7 +31,7 @@ class Report(src: User): Relationship(src) {
  * recompute them while offering
  * an index to all neighborhood nodes.
  */
-open class User() {
+class User() {
     // followers, mutedBy and reportedBy
     val inEdges = mutableListOf<Relationship>()
 
