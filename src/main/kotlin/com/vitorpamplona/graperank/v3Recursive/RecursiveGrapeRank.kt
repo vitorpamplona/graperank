@@ -103,8 +103,6 @@ class Graph() {
         target: User,
         observer: User
     ) {
-        if (target == observer) return
-
         while (observer.newScore(target)) {
             for (next in target.outEdges) {
                 updateScores(next, observer)
@@ -117,6 +115,8 @@ class Graph() {
      * it is different from the past
      */
     fun User.newScore(target: User): Boolean {
+        if (target == this) return false
+
         var weights = 0.0
         var ratings = 0.0
 
