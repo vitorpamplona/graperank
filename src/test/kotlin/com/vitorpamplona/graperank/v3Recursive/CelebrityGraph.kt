@@ -1,5 +1,6 @@
 package com.vitorpamplona.graperank.v3Recursive
 
+import com.vitorpamplona.graperank.utils.assertClose
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -155,13 +156,5 @@ class CelebrityGraph {
 
         assertClose(0.06774, newPleb.scores[pleb1])
         assertClose(0.01277, newPleb.scores[celebrity])
-    }
-
-    fun assertClose(
-        expected: Double,
-        actual: Double?,
-    ) {
-        // depends on the accuracy from graperank
-        assertEquals(expected, actual ?: 0.0, 0.0001)
     }
 }
