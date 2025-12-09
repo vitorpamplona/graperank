@@ -88,9 +88,7 @@ class Graph() {
         observers.add(observer)
         // the score of the observer is always
         // 1, so propagate from all outEdges
-        for (next in observer.outEdges) {
-            updateScores(next, observer)
-        }
+        processOutEdges(observer, observer)
     }
 
     fun computeScoresFrom(user: User) {
@@ -104,9 +102,24 @@ class Graph() {
         observer: User
     ) {
         while (observer.newScore(target)) {
-            for (next in target.outEdges) {
-                updateScores(next, observer)
+            processOutEdges(target, observer)
+        }
+    }
+
+    fun processOutEdges(
+        target: User,
+        observer: User
+    ) {
+        val recompute = mutableSetOf<User>()
+        recompute.addAll(target.outEdges)
+        while (recompute.isNotEmpty()) {
+            val next = recompute.first()
+            if (observer.newScore(next)) {
+                recompute.addAll(next.outEdges)
             }
+            // always remove because it can be
+            // part of outgoing edges
+            recompute.remove(next)
         }
     }
 
