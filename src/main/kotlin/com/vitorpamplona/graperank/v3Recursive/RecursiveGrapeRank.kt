@@ -36,7 +36,7 @@ class User() {
     val inEdges = mutableListOf<Relationship>()
 
     // my follows, mutes and reports
-    val outEdges = mutableSetOf<User>()
+    val outEdges = hashSetOf<User>()
 
     // scores from this user's standpoint
     val scores = mutableMapOf<User, Double>(
