@@ -23,7 +23,7 @@ class BrainstormStressTest: BaseStressTest() {
     @Test
     fun test() = with(Graph()) {
         val input = loadFile("wot_reference.jsonl")
-
+        
         printMemory()
 
         val time = measureTime {
