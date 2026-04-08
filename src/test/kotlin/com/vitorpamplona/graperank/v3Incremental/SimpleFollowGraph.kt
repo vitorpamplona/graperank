@@ -1,4 +1,4 @@
-package com.vitorpamplona.graperank.v3Recursive
+package com.vitorpamplona.graperank.v3Incremental
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
