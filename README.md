@@ -10,9 +10,9 @@ GrapeRank is a **subjective web-of-trust ranking algorithm**. Given a social gra
 
 1. [Core Concepts](#core-concepts)
 2. [The Score Formula](#the-score-formula)
-3. [Version 1 - Full Graph Sweep](#version-1--full-graph-sweep-v1iterative)
-4. [Version 2 - Reactive Full Sweep](#version-2--reactive-full-sweep-v2stateful)
-5. [Version 3 - Targeted BFS Propagation](#version-3--targeted-bfs-propagation-v3incremental)
+3. [Version 1 - Full Graph Sweep](#version-1--full-graph-sweep-v1fullsweep)
+4. [Version 2 - Reactive Full Sweep](#version-2--reactive-full-sweep-v2reactivesweep)
+5. [Version 3 - Targeted BFS Propagation](#version-3--targeted-bfs-propagation-v3targetedbfs)
 6. [Comparison Table](#comparison-table)
 7. [Signal Decay Illustration](#signal-decay-over-hops)
 
@@ -116,9 +116,9 @@ If a user is mostly reported (negative ratings), `sumOfWeightRating / sumOfWeigh
 
 ---
 
-## Version 1 -- Full Graph Sweep (`v1Iterative`)
+## Version 1 -- Full Graph Sweep (`v1FullSweep`)
 
-> **File:** `v1Iterative/GrapeRank.kt` (68 lines)
+> **File:** `v1FullSweep/GrapeRank.kt` (68 lines)
 
 ### The Walk
 
@@ -164,9 +164,9 @@ The sweep is **topology-blind**. In a graph with 50,000 users where the observer
 
 ### Complexity
 
-- **Time per call:** `O(R * (V + E))` -- R rounds, each scanning V users and their E edges.
-- **Space:** `O(V)` for the scores map.
-- **R** is typically small (2-4 rounds) because trust decays fast, but the `V` factor hurts on large graphs with sparse connectivity.
+- **Time per call:** `O(rounds * (users + edges))` -- each round scans all users and their edges.
+- **Space:** `O(users)` for the scores map.
+- Rounds are typically small (2-4) because trust decays fast, but the `users` factor hurts on large graphs with sparse connectivity.
 
 ### Walkthrough
 
@@ -194,9 +194,9 @@ Round 2:
 
 ---
 
-## Version 2 -- Reactive Full Sweep (`v2Stateful`)
+## Version 2 -- Reactive Full Sweep (`v2ReactiveSweep`)
 
-> **File:** `v2Stateful/StatefulGrapeRank.kt` (117 lines)
+> **File:** `v2ReactiveSweep/ReactiveSweepGrapeRank.kt` (117 lines)
 
 ### The Walk
 
@@ -225,23 +225,23 @@ The core problem is the same as V1: the walk doesn't know *which* part of the gr
 ```kotlin
 fun computeScoresFrom(user: User) {
     observers.forEach { observer ->
-        updateGrapevine(users, observer)  // full sweep of ALL users
+        sweepAllNodes(users, observer)  // full sweep of ALL users
     }
 }
 ```
 
 ### Complexity
 
-- **Time per edge addition:** `O(|observers| * R * (V + E))` -- same full sweep as V1, but multiplied by observer count and triggered on every mutation.
-- **Space:** `O(V * |observers|)` for stored scores.
+- **Time per edge addition:** `O(observers * rounds * (users + edges))` -- same full sweep as V1, but multiplied by observer count and triggered on every mutation.
+- **Space:** `O(users * observers)` for stored scores.
 
-On a graph with 50,000 users and 3 observers, adding one edge walks `3 * R * 50,000` nodes. This is the key bottleneck that V3 solves.
+On a graph with 50,000 users and 3 observers, adding one edge walks `3 * rounds * 50,000` nodes. This is the key bottleneck that V3 solves.
 
 ---
 
-## Version 3 -- Targeted BFS Propagation (`v3Incremental`)
+## Version 3 -- Targeted BFS Propagation (`v3TargetedBFS`)
 
-> **File:** `v3Incremental/IncrementalGrapeRank.kt` (162 lines)
+> **File:** `v3TargetedBFS/TargetedBFSGrapeRank.kt` (162 lines)
 
 ### The Walk
 
@@ -290,7 +290,7 @@ This requires each user to maintain an **outgoing edge index** (`outEdges`), whi
   │         │                                                    │
   │         v                                                    │
   │    WHILE observer.newScore(B) changed:                       │
-  │         processOutEdges(B, observer)                         │
+  │         propagateForward(B, observer)                         │
   │              │                                               │
   │              v                                               │
   │         BFS over outgoing edges:                             │
@@ -347,9 +347,9 @@ The BFS queue is a `mutableSetOf<User>` which naturally **deduplicates** -- if p
 
 ### Complexity
 
-- **Best case:** `O(|affected|)` -- only nodes whose scores actually change are visited. In a sparse graph where a new edge affects 5 nodes out of 50,000, only those 5 are walked.
-- **Worst case:** `O(R * (V + E))` -- same as V1/V2 if the entire graph is reachable and affected (e.g., a densely connected cluster). But this is rare.
-- **Space:** `O(V * |observers| + E)` -- extra memory for the outgoing edge index.
+- **Best case:** `O(affected nodes)` -- only nodes whose scores actually change are visited. In a sparse graph where a new edge affects 5 nodes out of 50,000, only those 5 are walked.
+- **Worst case:** `O(rounds * (users + edges))` -- same as V1/V2 if the entire graph is reachable and affected (e.g., a densely connected cluster). But this is rare.
+- **Space:** `O(users * observers + edges)` -- extra memory for the outgoing edge index.
 
 ### The Tradeoff: Memory for Speed
 
@@ -360,32 +360,35 @@ V3 stores **both** incoming and outgoing edges per user, using more memory than 
 ## Comparison Table
 
 ```
-                    V1 Iterative     V2 Stateful       V3 Incremental
-                ─────────────    ─────────────────   ──────────────────
-  Walk           Full sweep of    Full sweep of      Targeted BFS from
-  Strategy       all users,       all users,         change point,
-                 repeated until   repeated until     expanding only
-                 convergence      convergence        nodes that changed
+                  V1 FullSweep       V2 ReactiveSweep    V3 TargetedBFS
+                ────────────────   ────────────────────  ──────────────────
+  Walk           Full sweep of      Full sweep of        Targeted BFS from
+  Strategy       all users,         all users,           change point,
+                 repeated until     repeated until       expanding only
+                 convergence        convergence          nodes that changed
 
-  Nodes          ALL nodes,       ALL nodes,         Only affected
-  Visited        every round      every round        downstream nodes
+  Nodes          ALL nodes,         ALL nodes,           Only affected
+  Visited        every round        every round          downstream nodes
 
-  When It        Manual call      Auto on each       Auto on each
-  Runs           (one-shot)       edge mutation      edge mutation
+  When It        Manual call        Auto on each         Auto on each
+  Runs           (one-shot)         edge mutation         edge mutation
 
-  Edge Index     Incoming only    Incoming only      Incoming + Outgoing
+  Edge Index     Incoming only      Incoming only        Incoming + Outgoing
 
-  Cost per       O(R*(V+E))       O(|obs|*R*(V+E))   O(|obs|*|affected|)
-  Update
+  Cost per       O(rounds *         O(observers *        O(observers *
+  Update           (users+edges))     rounds *             affected nodes)
+                                       (users+edges))
 
-  Wasted Work    High: visits     Higher: same       Minimal: only
-                 unaffected       full sweep but     visits nodes
-                 nodes            per observer       whose scores
-                                  per mutation       actually change
+  Wasted Work    High: visits       Higher: same         Minimal: only
+                 unaffected         full sweep but       visits nodes
+                 nodes              per observer         whose scores
+                                    per mutation         actually change
 
-  Space          O(V)             O(V*|obs|)         O(V*|obs| + E)
+  Space          O(users)           O(users *            O(users *
+                                      observers)           observers
+                                                           + edges)
 
-  Lines of       68               117                162
+  Lines of       68                 117                  162
   Code
 ```
 
@@ -394,8 +397,8 @@ V3 stores **both** incoming and outgoing edges per user, using more memory than 
 Consider a graph with **50,000 users**, **3 observers**, and a single new follow edge that affects **5 downstream nodes**:
 
 ```
-  V1:  R * 50,000 nodes scanned             (manual call, one observer)
-  V2:  3 * R * 50,000 = ~300,000 nodes      (triggered per observer)
+  V1:  rounds * 50,000 nodes scanned        (manual call, one observer)
+  V2:  3 * rounds * 50,000 = ~300,000 nodes (triggered per observer)
   V3:  3 * 5 = 15 nodes                     (only the affected subgraph)
 ```
 
@@ -438,9 +441,9 @@ This aggressive decay is by design. After ~4 hops, the signal effectively vanish
 
 The three versions compute identical results but walk the graph very differently:
 
-1. **V1 Iterative** does a **blind full sweep** -- it scans every node in the graph on every round, regardless of which nodes are actually reachable or affected. Simple and correct, but `O(V)` work even when only a handful of nodes matter.
-2. **V2 Stateful** uses the **same full sweep**, but triggers it reactively on every edge mutation for every observer. The walk itself is unchanged; the cost multiplies by observer count and mutation frequency.
-3. **V3 Incremental** replaces the full sweep with a **targeted BFS walk** from the change point outward. By maintaining an outgoing edge index, it follows only the paths where scores actually propagate, skipping the rest of the graph entirely. This trades extra memory for dramatically fewer nodes visited.
+1. **V1 FullSweep** does a **blind full sweep** -- it scans every node in the graph on every round, regardless of which nodes are actually reachable or affected. Simple and correct, but `O(users)` work even when only a handful of nodes matter.
+2. **V2 ReactiveSweep** uses the **same full sweep**, but triggers it reactively on every edge mutation for every observer. The walk itself is unchanged; the cost multiplies by observer count and mutation frequency.
+3. **V3 TargetedBFS** replaces the full sweep with a **targeted BFS walk** from the change point outward. By maintaining an outgoing edge index, it follows only the paths where scores actually propagate, skipping the rest of the graph entirely. This trades extra memory for dramatically fewer nodes visited.
 
 All three produce **identical results** for the same inputs (verified by the test suite). The progression from V1 to V3 is a textbook evolution: from brute-force scanning to topology-aware traversal.
 

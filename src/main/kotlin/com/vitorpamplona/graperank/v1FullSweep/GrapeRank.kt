@@ -1,4 +1,4 @@
-package com.vitorpamplona.graperank.v1Iterative
+package com.vitorpamplona.graperank.v1FullSweep
 
 import kotlin.math.abs
 import kotlin.math.max

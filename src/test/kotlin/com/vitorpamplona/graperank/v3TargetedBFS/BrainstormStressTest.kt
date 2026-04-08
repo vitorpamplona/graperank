@@ -1,4 +1,4 @@
-package com.vitorpamplona.graperank.v3Incremental
+package com.vitorpamplona.graperank.v3TargetedBFS
 
 import com.vitorpamplona.graperank.utils.BaseStressTest
 import com.vitorpamplona.graperank.utils.assertClose

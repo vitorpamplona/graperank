@@ -1,4 +1,4 @@
-package com.vitorpamplona.graperank.v3Incremental
+package com.vitorpamplona.graperank.v3TargetedBFS
 
 import kotlin.test.Test
 import kotlin.test.assertEquals

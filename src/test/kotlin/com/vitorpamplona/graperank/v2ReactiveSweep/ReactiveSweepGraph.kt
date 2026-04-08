@@ -1,10 +1,10 @@
-package com.vitorpamplona.graperank.v2Stateful
+package com.vitorpamplona.graperank.v2ReactiveSweep
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.time.measureTime
 
-class StatefulGraph {
+class ReactiveSweepGraph {
     @Test
     fun test() = with(Graph()) {
         val alice = newUser()
