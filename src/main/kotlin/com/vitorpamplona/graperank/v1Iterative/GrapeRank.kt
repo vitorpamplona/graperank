@@ -1,4 +1,4 @@
-package com.vitorpamplona.graperank.v1Easy
+package com.vitorpamplona.graperank.v1Iterative
 
 import kotlin.math.abs
 import kotlin.math.max

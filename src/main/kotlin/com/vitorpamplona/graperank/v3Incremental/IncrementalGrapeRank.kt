@@ -1,4 +1,4 @@
-package com.vitorpamplona.graperank.v3Recursive
+package com.vitorpamplona.graperank.v3Incremental
 
 import kotlin.math.abs
 import kotlin.math.exp
