@@ -15,7 +15,8 @@ GrapeRank is a **subjective web-of-trust ranking algorithm**. Given a social gra
 5. [Version 3 - Targeted BFS Propagation](#version-3--targeted-bfs-propagation-v3targetedbfs)
 6. [Comparison Table](#comparison-table)
 7. [Signal Decay Illustration](#signal-decay-over-hops)
-8. [Future Work](#future-work)
+8. [Optimization Dimensions](#optimization-dimensions)
+9. [Future Work](#future-work)
 
 ---
 
@@ -415,7 +416,7 @@ One of the most important behaviors of GrapeRank is how trust decays over distan
   Score:  1.0    0.054     0.0015    0.00004    ~0.0
           │       │          │          │          │
           │       │          │          │          └─ Below convergence
-          │       │          │          └──────────── 37x decay
+          │       │          │          └──────────── 36x decay
           │       │          └─────────────────────── 36x decay
           │       └────────────────────────────────── 18.5x decay
           └────────────────────────────────────────── Observer (anchor)
@@ -447,6 +448,59 @@ The three versions compute identical results but walk the graph very differently
 3. **V3 TargetedBFS** replaces the full sweep with a **targeted BFS walk** from the change point outward. By maintaining an outgoing edge index, it follows only the paths where scores actually propagate, skipping the rest of the graph entirely. This trades extra memory for dramatically fewer nodes visited.
 
 All three produce **identical results** for the same inputs (verified by the test suite). The progression from V1 to V3 is a textbook evolution: from brute-force scanning to topology-aware traversal.
+
+---
+
+## Optimization Dimensions
+
+Every GrapeRank implementation makes choices along six independent axes. V1, V2, and V3 each pick one option per axis; future versions can improve any axis without affecting the others. The axes are **orthogonal** -- they can be mixed and matched freely.
+
+```
+  Axis               Options                                V1   V2   V3   Future
+  ─────────────────  ─────────────────────────────────────   ───  ───  ───  ──────
+  1. Execution       Sequential (one observer at a time)      ●    ●    ●
+     Model           Parallel (observers on separate cores)                    ○
+
+  2. Trigger         Manual (caller invokes once)             ●
+                     Eager (every edge mutation)                   ●    ●
+                     Batched (collect dirty set, flush)                        ○
+                     Lazy (compute on score read)                              ○
+
+  3. Walk Scope      Full sweep (all nodes, every round)      ●    ●
+     & Direction     Forward BFS from change point                       ●
+                     Backward walk from query point                            ○
+
+  4. Visit Order     Linear scan (user list order)            ●    ●
+                     BFS insertion order                                 ●
+                     Topological (by hop level)                                ○
+
+  5. Per-Node        Full recompute (scan all in-edges)       ●    ●    ●
+     Computation     Delta update (cached running sums)                        ○
+
+  6. Cached          Scores map (returned, not stored)        ●
+     State           Scores per observer                           ●    ●
+                     + Outgoing edge index                              ●
+                     + Running sums per (observer, node)                       ○
+
+  ● = current choice    ○ = proposed future option
+```
+
+### Reading the Table
+
+Each row is an independent design decision. A future "V4" could combine choices from different columns -- for example: **parallel** execution + **batched** trigger + **forward BFS** walk + **topological** visit order + **delta** per-node computation + **running sums** cache. That combination would address five of the six axes simultaneously.
+
+The progression from V1 to V3 changed axes 2, 3, 4, and 6 while leaving axes 1 and 5 untouched:
+
+```
+  V1 → V2:  Changed axis 2 (manual → eager trigger)
+             Changed axis 6 (return map → stored scores per observer)
+
+  V2 → V3:  Changed axis 3 (full sweep → forward BFS)
+             Changed axis 4 (linear scan → BFS order)
+             Changed axis 6 (added outgoing edge index)
+```
+
+The five Future Work techniques below each target a different axis (or pair of axes), which is why they compose well together.
 
 ---
 
