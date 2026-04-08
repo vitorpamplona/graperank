@@ -1,4 +1,4 @@
-package com.vitorpamplona.graperank.v2Stateful
+package com.vitorpamplona.graperank.v3TargetedBFS
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -36,7 +36,29 @@ class SimpleFollowGraph {
         assertEquals(1.0, pleb1.scores[pleb1])
         assertEquals(0.05394235327440411, pleb1.scores[pleb2])
 
-        assertEquals(0.0, pleb2.scores[pleb1])
+        assertEquals(null, pleb2.scores[pleb1])
+        assertEquals(1.0, pleb2.scores[pleb2])
+    }
+
+    fun test2PlebsInvertedOrder() = with(Graph()) {
+        val pleb1 = newUser()
+        val pleb2 = newUser()
+
+        makeObserver(pleb1)
+        makeObserver(pleb2)
+
+        assertEquals(1.0, pleb1.scores[pleb1])
+        assertEquals(null, pleb1.scores[pleb2])
+
+        assertEquals(null, pleb2.scores[pleb1])
+        assertEquals(1.0, pleb2.scores[pleb2])
+
+        pleb1 follows pleb2
+
+        assertEquals(1.0, pleb1.scores[pleb1])
+        assertEquals(0.05394235327440411, pleb1.scores[pleb2])
+
+        assertEquals(null, pleb2.scores[pleb1])
         assertEquals(1.0, pleb2.scores[pleb2])
     }
 
@@ -49,14 +71,14 @@ class SimpleFollowGraph {
         makeObserver(pleb1)
 
         assertEquals(1.0, pleb1.scores[pleb1])
-        assertEquals(0.0, pleb1.scores[pleb2])
-        assertEquals(0.0, pleb1.scores[pleb3])
+        assertEquals(null, pleb1.scores[pleb2])
+        assertEquals(null, pleb1.scores[pleb3])
 
         pleb1 follows pleb2
 
         assertEquals(1.0, pleb1.scores[pleb1])
         assertEquals(0.05394235327440411, pleb1.scores[pleb2])
-        assertEquals(0.0, pleb1.scores[pleb3])
+        assertEquals(null, pleb1.scores[pleb3])
 
         pleb2 follows pleb3
 

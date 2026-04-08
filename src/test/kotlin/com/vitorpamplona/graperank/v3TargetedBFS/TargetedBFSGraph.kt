@@ -1,10 +1,10 @@
-package com.vitorpamplona.graperank.v3Incremental
+package com.vitorpamplona.graperank.v3TargetedBFS
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.time.measureTime
 
-class IncrementalGraph {
+class TargetedBFSGraph {
     @Test
     fun test() = with(Graph()) {
         val alice = newUser()

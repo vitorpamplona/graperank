@@ -1,4 +1,4 @@
-package com.vitorpamplona.graperank.v2Stateful
+package com.vitorpamplona.graperank.v2ReactiveSweep
 
 import kotlin.math.abs
 import kotlin.math.exp
@@ -69,16 +69,16 @@ class Graph() {
 
     fun makeObserver(observer: User) {
         observers.add(observer)
-        updateGrapevine(users, observer)
+        sweepAllNodes(users, observer)
     }
 
    fun computeScoresFrom(user: User) {
         observers.forEach { observer ->
-            updateGrapevine(users, observer)
+            sweepAllNodes(users, observer)
         }
     }
 
-    fun updateGrapevine(users: List<User>, observer: User) {
+    fun sweepAllNodes(users: List<User>, observer: User) {
         do {
             var doAnotherRound = false
 

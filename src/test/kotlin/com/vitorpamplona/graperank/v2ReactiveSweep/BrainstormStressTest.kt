@@ -1,4 +1,4 @@
-package com.vitorpamplona.graperank.v2Stateful
+package com.vitorpamplona.graperank.v2ReactiveSweep
 
 import com.vitorpamplona.graperank.utils.BaseStressTest
 import com.vitorpamplona.graperank.utils.assertClose

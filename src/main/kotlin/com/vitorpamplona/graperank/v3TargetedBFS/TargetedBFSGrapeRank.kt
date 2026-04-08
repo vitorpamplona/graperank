@@ -1,4 +1,4 @@
-package com.vitorpamplona.graperank.v3Incremental
+package com.vitorpamplona.graperank.v3TargetedBFS
 
 import kotlin.math.abs
 import kotlin.math.exp
@@ -88,7 +88,7 @@ class Graph() {
         observers.add(observer)
         // the score of the observer is always
         // 1, so propagate from all outEdges
-        processOutEdges(observer, observer)
+        propagateForward(observer, observer)
     }
 
     fun computeScoresFrom(user: User) {
@@ -102,11 +102,11 @@ class Graph() {
         observer: User
     ) {
         while (observer.newScore(target)) {
-            processOutEdges(target, observer)
+            propagateForward(target, observer)
         }
     }
 
-    fun processOutEdges(
+    fun propagateForward(
         target: User,
         observer: User
     ) {
