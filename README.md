@@ -15,6 +15,7 @@ GrapeRank is a **subjective web-of-trust ranking algorithm**. Given a social gra
 5. [Version 3 - Targeted BFS Propagation](#version-3--targeted-bfs-propagation-v3targetedbfs)
 6. [Comparison Table](#comparison-table)
 7. [Signal Decay Illustration](#signal-decay-over-hops)
+8. [Future Work](#future-work)
 
 ---
 
@@ -446,6 +447,197 @@ The three versions compute identical results but walk the graph very differently
 3. **V3 TargetedBFS** replaces the full sweep with a **targeted BFS walk** from the change point outward. By maintaining an outgoing edge index, it follows only the paths where scores actually propagate, skipping the rest of the graph entirely. This trades extra memory for dramatically fewer nodes visited.
 
 All three produce **identical results** for the same inputs (verified by the test suite). The progression from V1 to V3 is a textbook evolution: from brute-force scanning to topology-aware traversal.
+
+---
+
+## Future Work
+
+V3's targeted BFS is a major improvement over the full-sweep approach, but there are still several bottlenecks visible in the current code. Each technique below addresses a different bottleneck, and they are largely complementary -- they could be combined in a single implementation.
+
+### 1. Batched Propagation
+
+**Bottleneck addressed:** V3 triggers a separate BFS walk for *every single edge addition*. When loading a social graph from a Nostr relay (thousands of follow/mute/report events), this means thousands of independent BFS walks that often traverse the same downstream nodes.
+
+**How it works:** Instead of propagating immediately when an edge is added, collect all affected nodes in a "dirty set." Propagation happens only when explicitly requested (a `flush()` call) or when a score is actually read. At that point, a single BFS walk starts from *all* dirty nodes at once, merging overlapping paths into one traversal.
+
+```
+  Current V3 (immediate, per-edge):
+
+  alice follows bob    → BFS walk (visits 12 nodes)
+  alice follows carol  → BFS walk (visits 15 nodes, 8 overlap with above)
+  alice follows david  → BFS walk (visits 8 nodes, 6 overlap)
+  ...500 edges total   → 500 separate BFS walks
+                          Many nodes visited repeatedly across walks.
+
+  Batched:
+
+  alice follows bob    → mark bob dirty
+  alice follows carol  → mark carol dirty
+  alice follows david  → mark david dirty
+  ...500 edges total   → 500 dirty marks (O(1) each)
+  flush()              → ONE BFS walk from all dirty nodes at once
+                          Overlapping downstream paths visited only once.
+```
+
+**Key difference from V3:** V3 does the right thing for a *single* edge change -- it only walks the affected subgraph. But it can't merge multiple changes together. Batching addresses the case where many edges change before anyone needs to read a score.
+
+### 2. Lazy Pull-Based Evaluation
+
+**Bottleneck addressed:** V3 computes scores *eagerly* -- every mutation pushes updates forward immediately, even if nobody ever reads the result. In a social app, you might sync 10,000 new events from a relay but only display scores for the 50 users in your current feed.
+
+**How it works:** Flip the direction entirely. Instead of pushing updates forward on mutation, mark affected nodes dirty and do nothing. When a score is *read*, walk **backward** from the queried node through its incoming edges, recursively resolving each source's score (which may itself need resolving). Cache results so repeated queries are fast. This is the same pattern spreadsheet engines use: cells aren't recomputed when a dependency changes, only when they're displayed.
+
+```
+  Current V3 (push-based / eager):
+
+  Mutation:  Add 10,000 edges → 10,000 forward propagation walks
+                                 All downstream scores updated immediately
+  Query:     score(userX)     → O(1) lookup (already computed)
+  Cost paid: proportional to ALL downstream nodes, even unqueried ones.
+
+  Lazy pull-based:
+
+  Mutation:  Add 10,000 edges → 10,000 dirty flags (O(1) each)
+  Query:     score(userX)     → walk backward from userX through its
+                                 incoming edges, resolve each source
+                                 recursively, cache results
+  Cost paid: proportional to userX's DEPENDENCY CHAIN only.
+```
+
+**Key difference from batched propagation:** Batching still computes everything -- it just groups the work into fewer walks. Lazy evaluation *skips* the work entirely for nodes nobody queries. Batching is better when most scores will eventually be read; lazy is better when only a small fraction are read.
+
+**Key difference from V3:** V3 walks *forward* from the change point (who does this affect?). Lazy walks *backward* from the query point (what does this depend on?). The direction reversal is what enables skipping unqueried nodes.
+
+### 3. Delta Propagation
+
+**Bottleneck addressed:** V3's `newScore()` function iterates **all** incoming edges of a node to recompute its score from scratch, even when only one source's score changed. For celebrity nodes with thousands of followers, this means scanning thousands of edges to handle a tiny score change from a single follower.
+
+**How it works:** Instead of recomputing `sumOfWeights` and `sumOfWeightRating` by iterating all edges, maintain these as **cached running totals** per (observer, node) pair. When a source's score changes by a known delta, update the cached sums directly:
+
+```
+  Current V3 (full recomputation):
+
+  Celebrity has 10,000 incoming follow edges.
+  One follower's score changes by 0.001.
+
+  newScore(celebrity):
+      sumOfWeights = 0
+      FOR EACH of 10,000 edges:          ← scans ALL edges
+          sumOfWeights += edge.conf * source.score
+          ...
+      Cost: O(10,000) per recomputation
+
+  Delta propagation:
+
+  Celebrity caches:  sumOfWeights = 42.5, sumOfWeightRating = 38.7
+  One follower's score changes by delta = 0.001
+
+      deltaWeight = 0.04 * 0.001 = 0.00004
+      sumOfWeights    += deltaWeight
+      sumOfWeightRating += deltaWeight * 1.0
+      Recompute final score from updated sums.
+      Cost: O(1) regardless of incoming edge count
+```
+
+**Key difference from V3:** V3 already knows *which* nodes to visit (the BFS frontier). Delta propagation optimizes *what happens inside each node visit* -- turning it from O(incoming edges) to O(1). These are orthogonal: V3 reduces the number of nodes visited, delta reduces the cost per visit.
+
+**Key difference from batched/lazy:** Batching and lazy address *when* and *whether* to compute. Delta addresses *how* to compute more cheaply. They work at different levels and compose well together.
+
+**The tradeoff:** Requires extra memory to store cached sums per (observer, node) pair, and the propagation logic becomes more complex because you need to track exactly which source changed and by how much.
+
+### 4. Topological Level-Based Walk
+
+**Bottleneck addressed:** V3's BFS processes nodes in insertion order within its queue, which doesn't guarantee that all of a node's inputs are finalized before the node is computed. When a node has multiple input sources at different depths, it may be computed with stale values and need revisiting.
+
+**How it works:** Organize nodes by their **hop distance** from the observer. Process all nodes at level 1 (direct follows) before any node at level 2 (two-hop connections), and so on. This guarantees that when you compute a node at level N, all its inputs at levels 0 through N-1 are already at their final values.
+
+```
+  Current V3 (BFS, arbitrary within-level order):
+
+  Observer → A → C
+  Observer → B → C       (C depends on both A and B)
+
+  BFS might process: A, then C (using stale B), then B
+  → C needs to be recomputed after B is updated.
+
+  Level-based:
+
+  Level 0: Observer           (score = 1.0, fixed)
+  Level 1: A, B               (depend only on Observer → compute, done)
+  Level 2: C                  (depends on A and B → both already final)
+  → C computed exactly once. No revisiting.
+```
+
+**Key difference from V3:** V3's BFS already traverses in roughly the right order, but it doesn't *enforce* level boundaries. When cross-links exist (edges between nodes at the same depth), V3 may revisit nodes. Level-based processing eliminates these redundant visits by making the ordering explicit.
+
+**Key difference from delta propagation:** Delta makes each individual node visit cheaper (O(1) instead of O(edges)). Topological ordering reduces the *number* of visits (each node computed once instead of potentially multiple times during convergence). They attack different sources of waste.
+
+**The tradeoff:** Requires a preprocessing step to compute hop distances (a simple BFS from the observer). For graphs with cycles (A follows B follows A), pure topological ordering doesn't work -- cyclic subgraphs must be detected and handled with iterative convergence as a fallback. Real social graphs are mostly acyclic, so cycles are rare and typically short.
+
+### 5. Parallel Observer Computation
+
+**Bottleneck addressed:** V3's `computeScoresFrom` loops over observers sequentially, but each observer's score computation is completely independent -- observer A's scores never depend on observer B's scores. This is wasted potential on multi-core devices.
+
+**How it works:** Replace the sequential `forEach` with parallel execution (e.g., Kotlin coroutines, Java parallel streams, or a thread pool). Each observer's BFS walk runs on its own core.
+
+```
+  Current V3 (sequential):
+
+  fun computeScoresFrom(user: User) {
+      observers.forEach { observer ->       // one at a time
+          updateScores(user, observer)
+      }
+  }
+  Total time: T(observer1) + T(observer2) + T(observer3)
+
+  Parallel:
+
+  fun computeScoresFrom(user: User) {
+      observers.parallelForEach { observer ->  // all at once
+          updateScores(user, observer)
+      }
+  }
+  Total time: max(T(observer1), T(observer2), T(observer3))
+```
+
+**Key difference from all above:** This doesn't change the algorithm at all -- it changes the *execution model*. The walk strategy, node visit cost, and computation logic remain identical to V3. It's a free speedup on multi-core hardware with zero algorithmic complexity.
+
+**The tradeoff:** Requires thread-safe score storage (each observer writes to its own score map, so there's no contention on writes, but reads of shared graph structure must be safe). On single-core devices there's no benefit and slight overhead from thread management.
+
+---
+
+### Impact Summary
+
+```
+  Technique              Bottleneck Addressed          Complexity Improvement
+  ───────────────────    ─────────────────────────     ─────────────────────────
+  Batched propagation    Redundant walks across        Merges N walks into 1.
+                         rapid edge additions          Best for: bulk loading
+                                                       (Nostr event sync)
+
+  Lazy pull-based        Eager computation of          Only computes scores
+                         scores nobody reads           that are actually queried.
+                                                       Best for: many mutations,
+                                                       few score reads
+
+  Delta propagation      Scanning all incoming         O(1) per node update
+                         edges on every visit          instead of O(incoming edges).
+                                                       Best for: celebrity nodes
+                                                       (high fan-in)
+
+  Topological levels     Redundant revisits from       Each node computed exactly
+                         out-of-order processing       once per level.
+                                                       Best for: mostly-acyclic
+                                                       social graphs
+
+  Parallel observers     Sequential observer loop      Divides time by core count.
+                         on multi-core hardware        Best for: multiple observers
+                                                       on multi-core devices
+```
+
+These techniques address different layers of the computation: *when* to compute (batched, lazy), *how much work per node* (delta), *what order to visit nodes* (topological), and *how to execute* (parallel). Because they target orthogonal bottlenecks, the most effective next version would likely combine two or three of them -- for instance, batched propagation with delta updates and parallel observers.
+
+---
 
 # MIT License
 
