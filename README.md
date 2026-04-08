@@ -10,9 +10,9 @@ GrapeRank is a **subjective web-of-trust ranking algorithm**. Given a social gra
 
 1. [Core Concepts](#core-concepts)
 2. [The Score Formula](#the-score-formula)
-3. [Version 1 - Stateless Iterative](#version-1--stateless-iterative-v1iterative)
-4. [Version 2 - Stateful Full Recomputation](#version-2--stateful-full-recomputation-v2stateful)
-5. [Version 3 - Incremental Forward Propagation](#version-3--incremental-forward-propagation-v3incremental)
+3. [Version 1 - Full Graph Sweep](#version-1--full-graph-sweep-v1iterative)
+4. [Version 2 - Reactive Full Sweep](#version-2--reactive-full-sweep-v2stateful)
+5. [Version 3 - Targeted BFS Propagation](#version-3--targeted-bfs-propagation-v3incremental)
 6. [Comparison Table](#comparison-table)
 7. [Signal Decay Illustration](#signal-decay-over-hops)
 
@@ -116,15 +116,26 @@ If a user is mostly reported (negative ratings), `sumOfWeightRating / sumOfWeigh
 
 ---
 
-## Version 1 -- Stateless Iterative (`v1Iterative`)
+## Version 1 -- Full Graph Sweep (`v1Iterative`)
 
 > **File:** `v1Iterative/GrapeRank.kt` (68 lines)
 
-### Design Philosophy
+### The Walk
 
-The simplest possible implementation. A pure function that takes the graph and an observer, returns a map of scores. No state is retained between calls.
+V1 walks the graph the simplest way possible: a **blind linear scan** over every user in the graph, repeated until nothing changes. It doesn't know or care about graph topology -- it just sweeps the entire user list, re-evaluating each node on every pass.
 
-### How It Works
+```
+  Graph with 50,000 users, Observer only follows Alice:
+
+  Observer ──follow──> Alice          Bob  Carol  David  ...  User₅₀₀₀₀
+                                       ↑    ↑      ↑              ↑
+                                       │    │      │              │
+  Round 1:  ─────────────── visits ALL 50,000 users ──────────────
+  Round 2:  ─────────────── visits ALL 50,000 users again ────────
+            (even though only Alice's score changed in round 1)
+```
+
+Each round visits every node and recomputes its score by scanning its incoming edges. If any score changed, the entire sweep runs again. This is **iterative relaxation**, the same pattern as PageRank's power iteration or Bellman-Ford's edge relaxation.
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
@@ -147,12 +158,15 @@ The simplest possible implementation. A pure function that takes the graph and a
 └────────────────────────────────────────────────────────────────┘
 ```
 
-### Algorithm Classification
+### Why It's Wasteful
 
-- **Pattern:** Iterative relaxation (similar to Bellman-Ford or PageRank power iteration)
-- **Convergence:** The algorithm halts when no score changes by more than `0.0001` in a full pass over all users.
-- **Time per call:** `O(R * (V + E))` where `R` = number of rounds to converge, `V` = users, `E` = edges.
+The sweep is **topology-blind**. In a graph with 50,000 users where the observer only connects to a handful, V1 still visits all 50,000 on every round -- including the vast majority whose scores will remain zero. It has no way to skip irrelevant nodes.
+
+### Complexity
+
+- **Time per call:** `O(R * (V + E))` -- R rounds, each scanning V users and their E edges.
 - **Space:** `O(V)` for the scores map.
+- **R** is typically small (2-4 rounds) because trust decays fast, but the `V` factor hurts on large graphs with sparse connectivity.
 
 ### Walkthrough
 
@@ -178,114 +192,78 @@ Round 2:
     -> converged, stop
 ```
 
-### Strengths and Weaknesses
-
-| Strengths | Weaknesses |
-|:----------|:-----------|
-| Easy to understand and verify | Must recompute everything from scratch each call |
-| Pure function, no side effects | No way to do incremental updates |
-| Minimal code (68 lines) | Not suitable for dynamic graphs |
-
 ---
 
-## Version 2 -- Stateful Full Recomputation (`v2Stateful`)
+## Version 2 -- Reactive Full Sweep (`v2Stateful`)
 
 > **File:** `v2Stateful/StatefulGrapeRank.kt` (117 lines)
 
-### Design Philosophy
+### The Walk
 
-Introduces **persistent state** so scores survive between graph mutations. Each observer's scores are stored inside the `User` object. When the graph changes (a new follow/mute/report), all observers' scores are recomputed. The core iteration loop is identical to V1 -- the key difference is *where* scores live and *when* recomputation is triggered.
-
-### Architecture
+V2 uses the **exact same full-sweep walk** as V1 -- iterating over every user in the graph each round until convergence. The traversal logic is identical. What changes is *when* it runs: every time an edge is added (`A follows B`, `A reports B`, etc.), the full sweep is triggered automatically for all observers.
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  Graph                                                      │
-│  ├── users: [User, User, User, ...]                         │
-│  └── observers: [User, User, ...]                           │
-│                                                             │
-│  User                                                       │
-│  ├── incomingEdges: [Follow(src=A), Report(src=B), ...]     │
-│  └── scores: { Observer1 -> 0.5, Observer2 -> 0.3, ... }   │
-│              ↑                                              │
-│              Scores are stored per-observer inside User     │
-└─────────────────────────────────────────────────────────────┘
-```
+  Adding a single edge in a 50,000-user graph:
 
-### How It Works
-
-```
-  User A follows User B
+  A follows B
        │
        v
-  B.incomingEdges.add(Follow(A))
-       │
-       v
-  graph.computeScoresFrom(A)
-       │
-       v
-  ┌──────────────────────────────┐
-  │  FOR EACH observer:          │
-  │    updateGrapevine(          │
-  │      all users, observer     │
-  │    )                         │
-  │                              │
-  │  updateGrapevine is the same │
-  │  iterative relaxation loop   │
-  │  as V1, storing results in   │
-  │  observer.scores[user]       │
-  └──────────────────────────────┘
+  ┌──────────────────────────────────────────────────────┐
+  │  FOR EACH observer:                                  │
+  │    Sweep ALL 50,000 users (round 1)                  │
+  │    Sweep ALL 50,000 users (round 2)                  │
+  │    ...until convergence                              │
+  └──────────────────────────────────────────────────────┘
+
+  One new edge → entire graph re-walked for every observer.
 ```
 
-### Key Difference from V1
+### Why It's Still Wasteful
 
-The `computeScoresFrom` method is called **automatically** whenever an edge is added. It loops over **all** registered observers and runs the full iterative relaxation for each one:
+The core problem is the same as V1: the walk doesn't know *which* part of the graph was affected by the new edge. Adding a single follow between two users at the edge of the graph still triggers a complete re-scan of all 50,000 nodes. The sweep is structurally incapable of skipping unaffected regions.
 
 ```kotlin
 fun computeScoresFrom(user: User) {
     observers.forEach { observer ->
-        updateGrapevine(users, observer)  // full recomputation
+        updateGrapevine(users, observer)  // full sweep of ALL users
     }
 }
 ```
 
-This uses Kotlin **context receivers** (`context(graph: Graph)`) so that calling `A follows B` automatically triggers the recomputation in the enclosing graph.
+### Complexity
 
-### Algorithm Classification
-
-- **Pattern:** Reactive full recomputation (event-driven trigger, same iterative core)
-- **Trigger:** Any edge mutation triggers a full pass over all users for all observers.
-- **Time per update:** `O(|observers| * R * (V + E))`
+- **Time per edge addition:** `O(|observers| * R * (V + E))` -- same full sweep as V1, but multiplied by observer count and triggered on every mutation.
 - **Space:** `O(V * |observers|)` for stored scores.
 
-### Strengths and Weaknesses
-
-| Strengths | Weaknesses |
-|:----------|:-----------|
-| Scores are always up-to-date after any mutation | Every edge addition triggers full recomputation |
-| Object-oriented, natural API (`A follows B`) | Wasted work: one new edge recomputes ALL users |
-| Supports multiple observers concurrently | Time cost scales with number of observers |
+On a graph with 50,000 users and 3 observers, adding one edge walks `3 * R * 50,000` nodes. This is the key bottleneck that V3 solves.
 
 ---
 
-## Version 3 -- Incremental Forward Propagation (`v3Incremental`)
+## Version 3 -- Targeted BFS Propagation (`v3Incremental`)
 
 > **File:** `v3Incremental/IncrementalGrapeRank.kt` (162 lines)
 
-### Design Philosophy
+### The Walk
 
-The key insight: when a single edge changes, you don't need to recompute the entire graph. You only need to update the **affected subgraph** -- the nodes reachable downstream from the change. V3 achieves this through **forward propagation** using a breadth-first traversal of outgoing edges.
-
-### Architecture
+V3 fundamentally changes the traversal strategy. Instead of blindly sweeping the entire graph, it starts at the **changed node** and walks **only forward** through outgoing edges, using breadth-first search. It stops expanding a path the moment a node's score doesn't change -- meaning the rest of that branch is unaffected and doesn't need visiting.
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  User                                                       │
-│  ├── inEdges:  [Follow(src=A), Mute(src=B), ...]           │
-│  ├── outEdges: {C, D, E}    <── NEW: bidirectional index   │
-│  └── scores:   { Observer1 -> 0.5, ... }                   │
-└─────────────────────────────────────────────────────────────┘
+  Same 50,000-user graph, adding one edge:
 
+  A follows B
+       │
+       v
+  Start at B, recompute B's score.
+  B's score changed → follow B's outEdges → {C, D}
+  Recompute C → changed → follow C's outEdges → {E}
+  Recompute D → NOT changed → STOP this path
+  Recompute E → NOT changed → STOP
+  Done. Visited 4 nodes instead of 50,000.
+```
+
+This requires each user to maintain an **outgoing edge index** (`outEdges`), which V1 and V2 don't have. This index answers the question: "if my score changes, whose scores might be affected?" -- enabling the targeted walk.
+
+```
        inEdges (who trusts me)        outEdges (who I vouch for)
              ┌───┐                          ┌───┐
         A ──>│   │                          │   │──> C
@@ -294,9 +272,7 @@ The key insight: when a single edge changes, you don't need to recompute the ent
              └───┘                          └───┘
 ```
 
-The addition of `outEdges` is what enables forward propagation. When T's score changes, we know exactly which nodes (C, D, E) might be affected, because T is an input to their score calculation.
-
-### How It Works -- The Propagation
+### The BFS Walk Step by Step
 
 ```
   User A follows User B
@@ -324,58 +300,36 @@ The addition of `outEdges` is what enables forward propagation. When T's score c
   │         │      next = queue.removeFirst()                  │ │
   │         │      IF observer.newScore(next) changed:         │ │
   │         │          queue.addAll(next.outEdges)             │ │
-  │         │                ↑                                 │ │
-  │         │                Only expands if score changed!    │ │
+  │         │      ELSE:                                       │ │
+  │         │          (stop expanding this path)              │ │
   │         └──────────────────────────────────────────────────┘ │
   └──────────────────────────────────────────────────────────────┘
 ```
 
-### The BFS Propagation Visualized
-
-Imagine this graph, where Observer follows A, A follows B, and B follows C:
+### Visualized: V2 vs V3 on the Same Graph
 
 ```
-  Step 1: Observer follows A (new edge)
-  ════════════════════════════════════════════
+  Graph:  Observer ──> A ──> B ──> C        D  E  F  ...  Z
+                                             (disconnected users)
 
-         Observer ──follow──> A ──follow──> B ──follow──> C
+  V2 walk (full sweep):
+  ┌─────────────────────────────────────────────────────────────┐
+  │  Visit: Observer, A, B, C, D, E, F, G, H, ... Z            │
+  │         ════════════════════════════════════════             │
+  │         All nodes visited. Most are wasted work.            │
+  └─────────────────────────────────────────────────────────────┘
 
-  Start at A (the target of the new edge).
-
-  Step 2: Recompute A's score
-  ════════════════════════════════════════════
-
-         Observer ──follow──> [A] ──follow──> B ──follow──> C
-                               ↑
-                          score changed!
-                          (was 0, now 0.054)
-
-  A's score changed, so add A.outEdges = {B} to the queue.
-
-  Step 3: Process queue -> recompute B
-  ════════════════════════════════════════════
-
-         Observer ──follow──> A ──follow──> [B] ──follow──> C
-                                             ↑
-                                        score changed!
-                                        (was 0, now 0.0015)
-
-  B's score changed, so add B.outEdges = {C} to the queue.
-
-  Step 4: Process queue -> recompute C
-  ════════════════════════════════════════════
-
-         Observer ──follow──> A ──follow──> B ──follow──> [C]
-                                                           ↑
-                                                      score changed!
-                                                      (was 0, now 0.00004)
-
-  C's score changed, but C.outEdges = {} (empty). Queue is empty. Done!
+  V3 walk (targeted BFS from change point):
+  ┌─────────────────────────────────────────────────────────────┐
+  │  Visit: A → B → C → (C has no outEdges, stop)              │
+  │         ═════════                                           │
+  │         3 nodes visited. D through Z never touched.         │
+  └─────────────────────────────────────────────────────────────┘
 ```
 
 ### Handling Cycles
 
-The use of a `mutableSetOf<User>` as the queue is critical for cycle handling. Sets automatically deduplicate, so if propagation reaches a node that's already in the queue, it won't be added again. And the convergence check (`|new - old| > 0.0001`) ensures that cycles eventually stop propagating when scores stabilize.
+The BFS queue is a `mutableSetOf<User>` which naturally **deduplicates** -- if propagation loops back to a node already in the queue, it won't be added twice. The convergence threshold (`|delta| < 0.0001`) ensures cycles terminate when scores stabilize:
 
 ```
          ┌──────────────────────┐
@@ -391,22 +345,15 @@ The use of a `mutableSetOf<User>` as the queue is critical for cycle handling. S
   Round 2: Recompute A -> |delta| < 0.0001 -> NOT changed -> stop
 ```
 
-### Algorithm Classification
+### Complexity
 
-- **Pattern:** Event-driven incremental BFS propagation
-- **Trigger:** Edge addition triggers update starting at the affected node only.
-- **Best case:** `O(|affected subgraph|)` -- only nodes whose scores actually change are visited.
-- **Worst case:** `O(R * (V + E))` same as V1/V2 (if entire graph is affected), but typically much better.
-- **Space:** `O(V * |observers|) + O(E)` extra for outgoing edges index.
+- **Best case:** `O(|affected|)` -- only nodes whose scores actually change are visited. In a sparse graph where a new edge affects 5 nodes out of 50,000, only those 5 are walked.
+- **Worst case:** `O(R * (V + E))` -- same as V1/V2 if the entire graph is reachable and affected (e.g., a densely connected cluster). But this is rare.
+- **Space:** `O(V * |observers| + E)` -- extra memory for the outgoing edge index.
 
-### Strengths and Weaknesses
+### The Tradeoff: Memory for Speed
 
-| Strengths | Weaknesses |
-|:----------|:-----------|
-| Only recomputes affected nodes | Higher memory: stores both in and out edges |
-| BFS avoids stack overflow (vs. recursive DFS) | More complex implementation (162 lines vs 68) |
-| Ideal for dynamic graphs with frequent updates | Set-based queue has overhead for small graphs |
-| Propagation stops early when scores converge | |
+V3 stores **both** incoming and outgoing edges per user, using more memory than V1/V2. This is a classic space-time tradeoff: the outgoing index is what makes the targeted walk possible, avoiding the blind full sweep.
 
 ---
 
@@ -415,29 +362,41 @@ The use of a `mutableSetOf<User>` as the queue is critical for cycle handling. S
 ```
                     V1 Iterative     V2 Stateful       V3 Incremental
                 ─────────────    ─────────────────   ──────────────────
-  State            None            Per-observer       Per-observer
-                                    scores             scores + out-edges
+  Walk           Full sweep of    Full sweep of      Targeted BFS from
+  Strategy       all users,       all users,         change point,
+                 repeated until   repeated until     expanding only
+                 convergence      convergence        nodes that changed
 
-  Trigger       Manual call       Auto on edge add   Auto on edge add
+  Nodes          ALL nodes,       ALL nodes,         Only affected
+  Visited        every round      every round        downstream nodes
 
-  Recompute      Entire graph     Entire graph       Affected subgraph
-  Scope           (all users)      (all users)        only (BFS)
+  When It        Manual call      Auto on each       Auto on each
+  Runs           (one-shot)       edge mutation      edge mutation
 
   Edge Index     Incoming only    Incoming only      Incoming + Outgoing
 
-  Update Cost    O(R*(V+E))       O(|obs|*R*(V+E))   O(|obs|*|affected|)
-  per call
+  Cost per       O(R*(V+E))       O(|obs|*R*(V+E))   O(|obs|*|affected|)
+  Update
+
+  Wasted Work    High: visits     Higher: same       Minimal: only
+                 unaffected       full sweep but     visits nodes
+                 nodes            per observer       whose scores
+                                  per mutation       actually change
 
   Space          O(V)             O(V*|obs|)         O(V*|obs| + E)
 
-  API Style      Pure function    OOP + context      OOP + context
-                                   receivers          receivers
-
-  Best For       One-shot         Multi-observer,    Large dynamic graphs,
-                  analysis         small graphs       frequent updates
-
   Lines of       68               117                162
   Code
+```
+
+### Complexity at a Glance
+
+Consider a graph with **50,000 users**, **3 observers**, and a single new follow edge that affects **5 downstream nodes**:
+
+```
+  V1:  R * 50,000 nodes scanned             (manual call, one observer)
+  V2:  3 * R * 50,000 = ~300,000 nodes      (triggered per observer)
+  V3:  3 * 5 = 15 nodes                     (only the affected subgraph)
 ```
 
 ---
@@ -477,13 +436,13 @@ This aggressive decay is by design. After ~4 hops, the signal effectively vanish
 
 ## Summary
 
-The three versions represent a natural evolution of the same core algorithm:
+The three versions compute identical results but walk the graph very differently:
 
-1. **V1 Iterative** is a **textbook implementation** -- a pure function, easy to reason about, perfect for understanding the math.
-2. **V2 Stateful** adds **statefulness and reactivity** -- scores are stored and automatically recomputed on mutations, but the inner loop is still brute-force over the entire graph.
-3. **V3 Incremental** adds **surgical precision** -- by indexing outgoing edges and using BFS propagation, it only touches nodes whose scores actually need to change, making it dramatically more efficient for large, dynamic social graphs.
+1. **V1 Iterative** does a **blind full sweep** -- it scans every node in the graph on every round, regardless of which nodes are actually reachable or affected. Simple and correct, but `O(V)` work even when only a handful of nodes matter.
+2. **V2 Stateful** uses the **same full sweep**, but triggers it reactively on every edge mutation for every observer. The walk itself is unchanged; the cost multiplies by observer count and mutation frequency.
+3. **V3 Incremental** replaces the full sweep with a **targeted BFS walk** from the change point outward. By maintaining an outgoing edge index, it follows only the paths where scores actually propagate, skipping the rest of the graph entirely. This trades extra memory for dramatically fewer nodes visited.
 
-All three produce **identical results** for the same inputs (verified by the test suite), but they trade off simplicity for performance as the graph grows.
+All three produce **identical results** for the same inputs (verified by the test suite). The progression from V1 to V3 is a textbook evolution: from brute-force scanning to topology-aware traversal.
 
 # MIT License
 
