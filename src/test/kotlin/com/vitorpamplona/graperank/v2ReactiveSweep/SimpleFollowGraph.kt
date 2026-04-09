@@ -26,7 +26,7 @@ class SimpleFollowGraph {
         makeObserver(pleb1)
 
         assertEquals(1.0, pleb1.scores[pleb1])
-        assertEquals(0.05394235327440411, pleb1.scores[pleb2])
+        assertEquals(0.25516126843864884, pleb1.scores[pleb2])
 
         assertEquals(null, pleb2.scores[pleb1])
         assertEquals(1.0, pleb2.scores[pleb2])
@@ -34,7 +34,7 @@ class SimpleFollowGraph {
         makeObserver(pleb2)
 
         assertEquals(1.0, pleb1.scores[pleb1])
-        assertEquals(0.05394235327440411, pleb1.scores[pleb2])
+        assertEquals(0.25516126843864884, pleb1.scores[pleb2])
 
         assertEquals(0.0, pleb2.scores[pleb1])
         assertEquals(1.0, pleb2.scores[pleb2])
@@ -55,13 +55,13 @@ class SimpleFollowGraph {
         pleb1 follows pleb2
 
         assertEquals(1.0, pleb1.scores[pleb1])
-        assertEquals(0.05394235327440411, pleb1.scores[pleb2])
+        assertEquals(0.25516126843864884, pleb1.scores[pleb2])
         assertEquals(0.0, pleb1.scores[pleb3])
 
         pleb2 follows pleb3
 
         assertEquals(1.0, pleb1.scores[pleb1])
-        assertEquals(0.05394235327440411, pleb1.scores[pleb2])
-        assertEquals(0.001494481751665666, pleb1.scores[pleb3])
+        assertEquals(0.25516126843864884, pleb1.scores[pleb2])
+        assertEquals(0.004499885043810381, pleb1.scores[pleb3])
     }
 }

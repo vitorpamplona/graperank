@@ -5,6 +5,8 @@ import kotlin.math.max
 import kotlin.math.exp
 import kotlin.math.ln
 
+const val ATTENUATION = 0.85
+
 sealed class Relationship(val src: User) {
     abstract fun confidence(observer: User): Double
     abstract fun rating(): Double
@@ -12,17 +14,17 @@ sealed class Relationship(val src: User) {
 
 class Follow(src: User): Relationship(src) {
     override fun rating() = 1.0
-    override fun confidence(observer: User): Double = if (observer == src) 0.08 else 0.04
+    override fun confidence(observer: User): Double = if (observer == src) 0.5 else 0.03
 }
 
 class Mute(src: User): Relationship(src) {
-    override fun rating() = 0.0
-    override fun confidence(observer: User): Double = 0.4
+    override fun rating() = -0.1
+    override fun confidence(observer: User): Double = 0.5
 }
 
 class Report(src: User): Relationship(src) {
     override fun rating() =  -0.1
-    override fun confidence(observer: User): Double = 0.4
+    override fun confidence(observer: User): Double = 0.5
 }
 
 class User {
@@ -49,7 +51,7 @@ fun grapeRank(users: List<User>, observer: User) =
                 for (edge in targetUser.incomingEdges) {
                     val currentScore = this[edge.src] ?: continue
 
-                    val weight = edge.confidence(observer) * currentScore
+                    val weight = edge.confidence(observer) * currentScore * ATTENUATION
                     sumOfWeights += weight
                     sumOfWeightRating += weight * edge.rating()
                 }

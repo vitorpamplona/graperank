@@ -22,8 +22,8 @@ class SimpleGraph {
         val scores = grapeRank(users, alice)
 
         assertEquals(1.0, scores[alice])
-        assertEquals(0.05394235327440411, scores[bob])
+        assertEquals(0.25516126843864884, scores[bob])
         assertEquals(0.0, scores[charlie])
-        assertEquals(0.001494481751665666, scores[david])
+        assertEquals(0.004499885043810381, scores[david])
     }
 }
