@@ -33,7 +33,7 @@ class ReactiveSweepGraph {
         println("alice follows bob: GrapeRank computed in $time1")
 
         assertEquals(1.0, alice.scores[alice])
-        assertEquals(0.05394235327440411, alice.scores[bob])
+        assertEquals(0.25516126843864884, alice.scores[bob])
         assertEquals(0.0, alice.scores[charlie])
         assertEquals(0.0, alice.scores[david])
 
@@ -43,9 +43,9 @@ class ReactiveSweepGraph {
         println("bob follows david: GrapeRank computed in $time2")
 
         assertEquals(1.0, alice.scores[alice])
-        assertEquals(0.05394235327440411, alice.scores[bob])
+        assertEquals(0.25516126843864884, alice.scores[bob])
         assertEquals(0.0, alice.scores[charlie])
-        assertEquals(0.001494481751665666, alice.scores[david])
+        assertEquals(0.004499885043810381, alice.scores[david])
 
         val time3 = measureTime {
             bob follows charlie
@@ -53,9 +53,9 @@ class ReactiveSweepGraph {
         println("bob follows charlie: GrapeRank computed in $time3")
 
         assertEquals(1.0, alice.scores[alice])
-        assertEquals(0.05394235327440411, alice.scores[bob])
-        assertEquals(0.001494481751665666, alice.scores[charlie])
-        assertEquals(0.001494481751665666, alice.scores[david])
+        assertEquals(0.25516126843864884, alice.scores[bob])
+        assertEquals(0.004499885043810381, alice.scores[charlie])
+        assertEquals(0.004499885043810381, alice.scores[david])
 
         val time4 = measureTime {
             david mutes charlie
@@ -63,9 +63,9 @@ class ReactiveSweepGraph {
         println("david mutes charlie: GrapeRank computed in $time4")
 
         assertEquals(1.0, alice.scores[alice])
-        assertEquals(0.05394235327440411, alice.scores[bob])
-        assertEquals(0.0014941722461121313, alice.scores[charlie])
-        assertEquals(0.001494481751665666, alice.scores[david])
+        assertEquals(0.25516126843864884, alice.scores[bob])
+        assertEquals(0.0043647310818470215, alice.scores[charlie])
+        assertEquals(0.004499885043810381, alice.scores[david])
 
         val time5 = measureTime {
             alice reports charlie
@@ -73,8 +73,8 @@ class ReactiveSweepGraph {
         println("alice reports charlie: GrapeRank computed in $time5")
 
         assertEquals(1.0, alice.scores[alice])
-        assertEquals(0.05394235327440411, alice.scores[bob])
+        assertEquals(0.25516126843864884, alice.scores[bob])
         assertEquals(0.0, alice.scores[charlie])
-        assertEquals(0.001494481751665666, alice.scores[david])
+        assertEquals(0.004499885043810381, alice.scores[david])
     }
 }

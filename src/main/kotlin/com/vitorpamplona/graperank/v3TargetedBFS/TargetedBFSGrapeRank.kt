@@ -4,6 +4,8 @@ import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.ln
 
+const val ATTENUATION = 0.85
+
 sealed class Relationship(val src: User) {
     abstract fun conf(observer: User): Double
     abstract fun rating(): Double
@@ -12,17 +14,17 @@ sealed class Relationship(val src: User) {
 class Follow(src: User): Relationship(src) {
     override fun rating() = 1.0
     override fun conf(observer: User) =
-        if (observer == src) 0.08 else 0.04
+        if (observer == src) 0.5 else 0.03
 }
 
 class Mute(src: User): Relationship(src) {
-    override fun rating() = 0.0
-    override fun conf(observer: User) = 0.4
+    override fun rating() = -0.1
+    override fun conf(observer: User) = 0.5
 }
 
 class Report(src: User): Relationship(src) {
     override fun rating() = -0.1
-    override fun conf(observer: User)= 0.4
+    override fun conf(observer: User) = 0.5
 }
 
 /**
@@ -135,7 +137,7 @@ class Graph() {
 
         for (edge in target.inEdges) {
             val sc = score(edge) ?: continue
-            val weight = edge.conf(this) * sc
+            val weight = edge.conf(this) * sc * ATTENUATION
 
             weights += weight
             ratings += weight * edge.rating()

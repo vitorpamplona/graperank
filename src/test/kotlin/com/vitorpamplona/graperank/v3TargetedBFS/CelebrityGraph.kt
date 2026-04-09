@@ -35,47 +35,47 @@ class CelebrityGraph {
 
         newPleb follows pleb1
 
-        assertClose(0.05394235327440411, newPleb.scores[pleb1])
-        assertClose(0.001494481751665666, newPleb.scores[celebrity])
+        assertClose(0.25516126843864884, newPleb.scores[pleb1])
+        assertClose(0.004499885043810381, newPleb.scores[celebrity])
         assertEquals(null, newPleb.scores[pleb2])
         assertEquals(null, newPleb.scores[pleb3])
 
         newPleb follows pleb2
 
-        assertClose(0.05394235327440411, newPleb.scores[pleb1])
-        assertClose(0.002986730027625284, newPleb.scores[celebrity])
-        assertClose(0.05394235327440411, newPleb.scores[pleb2])
+        assertClose(0.25516126843864884, newPleb.scores[pleb1])
+        assertClose(0.00897952112221323, newPleb.scores[celebrity])
+        assertClose(0.25516126843864884, newPleb.scores[pleb2])
         assertEquals(null, newPleb.scores[pleb3])
 
         newPleb follows pleb3
 
-        assertClose(0.05394235327440411, newPleb.scores[pleb1])
-        assertClose(0.004476748165767597, newPleb.scores[celebrity])
+        assertClose(0.25516126843864884, newPleb.scores[pleb1])
+        assertClose(0.013438999353225234, newPleb.scores[celebrity])
 
         pleb3 follows pleb1
 
-        assertClose(0.05535621916345923, newPleb.scores[pleb1])
-        assertClose(0.004515772595457879, newPleb.scores[celebrity])
+        assertClose(0.2585129571068525, newPleb.scores[pleb1])
+        assertClose(0.013497443415107724, newPleb.scores[celebrity])
 
         newPleb follows pleb4
 
-        assertClose(0.05535621916345923, newPleb.scores[pleb1])
-        assertClose(0.00600350560738494, newPleb.scores[celebrity])
+        assertClose(0.2585129571068525, newPleb.scores[pleb1])
+        assertClose(0.0179365915151648, newPleb.scores[celebrity])
 
         newPleb follows pleb5
 
-        assertClose(0.05535621916345923, newPleb.scores[pleb1])
-        assertClose(0.007489015229474427, newPleb.scores[celebrity])
+        assertClose(0.2585129571068525, newPleb.scores[pleb1])
+        assertClose(0.022355763959079122, newPleb.scores[celebrity])
 
         newPleb follows pleb6
 
-        assertClose(0.05535621916345923, newPleb.scores[pleb1])
-        assertClose(0.008972304784541696, newPleb.scores[celebrity])
+        assertClose(0.2585129571068525, newPleb.scores[pleb1])
+        assertClose(0.02675505063500705, newPleb.scores[celebrity])
 
         newPleb follows pleb7
 
-        assertClose(0.05535621916345923, newPleb.scores[pleb1])
-        assertClose(0.010453377590436519, newPleb.scores[celebrity])
+        assertClose(0.2585129571068525, newPleb.scores[pleb1])
+        assertClose(0.031134541026618612, newPleb.scores[celebrity])
     }
 
     @Test
@@ -115,46 +115,46 @@ class CelebrityGraph {
 
         newPleb follows pleb1
 
-        assertClose(0.05569, newPleb.scores[pleb1])
-        assertClose(0.00183, newPleb.scores[celebrity])
-        assertClose(0.00185, newPleb.scores[pleb2])
-        assertClose(0.00185, newPleb.scores[pleb3])
+        assertClose(0.25896, newPleb.scores[pleb1])
+        assertClose(0.00511, newPleb.scores[celebrity])
+        assertClose(0.00511, newPleb.scores[pleb2])
+        assertClose(0.00511, newPleb.scores[pleb3])
 
         newPleb follows pleb2
 
-        assertClose(0.05743, newPleb.scores[pleb1])
-        assertClose(0.00367, newPleb.scores[celebrity])
-        assertClose(0.05743, newPleb.scores[pleb2])
-        assertClose(0.00368, newPleb.scores[pleb3])
+        assertClose(0.26271, newPleb.scores[pleb1])
+        assertClose(0.01013, newPleb.scores[celebrity])
+        assertClose(0.26271, newPleb.scores[pleb2])
+        assertClose(0.01013, newPleb.scores[pleb3])
 
         newPleb follows pleb3
 
-        assertClose(0.05916, newPleb.scores[pleb1])
-        assertClose(0.00550, newPleb.scores[celebrity])
+        assertClose(0.26639, newPleb.scores[pleb1])
+        assertClose(0.01508, newPleb.scores[celebrity])
 
         pleb3 follows pleb1
 
-        assertClose(0.06075, newPleb.scores[pleb1])
-        assertClose(0.00556, newPleb.scores[celebrity])
+        assertClose(0.26989, newPleb.scores[pleb1])
+        assertClose(0.01514, newPleb.scores[celebrity])
 
         newPleb follows pleb4
 
-        assertClose(0.06251, newPleb.scores[pleb1])
-        assertClose(0.00737, newPleb.scores[celebrity])
+        assertClose(0.27354, newPleb.scores[pleb1])
+        assertClose(0.02001, newPleb.scores[celebrity])
 
         newPleb follows pleb5
 
-        assertClose(0.06426, newPleb.scores[pleb1])
-        assertClose(0.00918, newPleb.scores[celebrity])
+        assertClose(0.27714, newPleb.scores[pleb1])
+        assertClose(0.02481, newPleb.scores[celebrity])
 
         newPleb follows pleb6
 
-        assertClose(0.06601, newPleb.scores[pleb1])
-        assertClose(0.01098, newPleb.scores[celebrity])
+        assertClose(0.28069, newPleb.scores[pleb1])
+        assertClose(0.02953, newPleb.scores[celebrity])
 
         newPleb follows pleb7
 
-        assertClose(0.06774, newPleb.scores[pleb1])
-        assertClose(0.01277, newPleb.scores[celebrity])
+        assertClose(0.28418, newPleb.scores[pleb1])
+        assertClose(0.03418, newPleb.scores[celebrity])
     }
 }
