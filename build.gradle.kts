@@ -1,5 +1,6 @@
 plugins {
     kotlin("jvm") version "2.2.20"
+    id("com.gradleup.shadow") version "8.3.6"
 }
 
 group = "com.vitorpamplona.graperank"
@@ -11,13 +12,39 @@ repositories {
     google()
 }
 
+val neo4jVersion = "5.26.0"
+
 dependencies {
-    implementation("com.vitorpamplona.quartz:quartz:1.05.0-SNAPSHOT")
+    // quartz is only used by BrainstormStressTest — uncomment when available locally
+    // testImplementation("com.vitorpamplona.quartz:quartz:1.05.0-SNAPSHOT")
+
+    // Neo4j procedure API (provided by Neo4j at runtime)
+    compileOnly("org.neo4j:neo4j:$neo4jVersion")
+
     testImplementation(kotlin("test"))
+    testImplementation("org.neo4j.test:neo4j-harness:$neo4jVersion")
+    testImplementation("org.neo4j.driver:neo4j-java-driver:5.27.0")
+}
+
+// Build a fat JAR for Neo4j plugin deployment (excludes Neo4j itself)
+tasks.shadowJar {
+    archiveClassifier.set("neo4j-plugin")
+    dependencies {
+        exclude(dependency("org.neo4j:.*:.*"))
+        exclude(dependency("org.neo4j.test:.*:.*"))
+        exclude(dependency("org.neo4j.driver:.*:.*"))
+    }
 }
 
 tasks.test {
     useJUnitPlatform()
+}
+
+// Exclude stress tests that require quartz (local SNAPSHOT) when it's unavailable
+sourceSets.test {
+    kotlin {
+        exclude("**/BrainstormStressTest.kt")
+    }
 }
 kotlin {
     compilerOptions {
