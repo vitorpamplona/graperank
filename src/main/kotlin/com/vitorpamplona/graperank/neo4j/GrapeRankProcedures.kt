@@ -33,6 +33,7 @@ class GrapeRankProcedures {
         const val MINIMUM_WEIGHT = 0.00001
         const val RIGOR = 0.5
         const val CUTOFF_TRUSTED_REPORTER = 0.1
+        const val MAX_HOPS = 10
 
         @JvmField val NOSTR_USER: Label = Label.label("NostrUser")
         @JvmField val GRAPERANK_OBSERVER: Label = Label.label("GrapeRankObserver")
@@ -59,16 +60,47 @@ class GrapeRankProcedures {
     )
 
     // ------------------------------------------------------------------ //
-    //  Property name helpers (match production format)                     //
+    //  Per-observer context — caches everything for one computation pass   //
     // ------------------------------------------------------------------ //
 
-    private fun influenceProp(obsPubkey: String) = "influence_$obsPubkey"
-    private fun hopsProp(obsPubkey: String) = "hops_$obsPubkey"
-    private fun trustedReportersProp(obsPubkey: String) = "trusted_reporters_$obsPubkey"
+    /**
+     * Holds all mutable state for a single observer's score computation.
+     * Created once per observer per procedure call; avoids repeated string
+     * allocations and node lookups.
+     */
+    private inner class ObserverContext(
+        val observer: Node,
+        val obsPubkey: String
+    ) {
+        val obsElementId: String = observer.elementId
 
-    private fun getStoredInfluence(node: Node, obsPubkey: String): Double? {
-        val prop = influenceProp(obsPubkey)
-        return if (node.hasProperty(prop)) node.getProperty(prop) as Double else null
+        // Pre-computed property names (avoid repeated string concat)
+        val infProp: String = "influence_$obsPubkey"
+        val hopProp: String = "hops_$obsPubkey"
+        val trProp: String = "trusted_reporters_$obsPubkey"
+
+        // Working score cache: elementId -> influence
+        val scores: MutableMap<String, Double> = mutableMapOf(obsElementId to 1.0)
+
+        // Scores as they were stored BEFORE this computation started.
+        // Used to detect what actually changed vs. persisted state.
+        val priorStored: MutableMap<String, Double> = mutableMapOf()
+
+        // Nodes whose score changed relative to what was stored.
+        val changedNodes: MutableSet<String> = mutableSetOf()
+
+        // elementId -> Node cache to avoid getNodeByElementId lookups
+        val nodeCache: MutableMap<String, Node> = mutableMapOf(obsElementId to observer)
+
+        fun getStoredInfluence(node: Node): Double? {
+            return if (node.hasProperty(infProp)) node.getProperty(infProp) as Double else null
+        }
+
+        fun cacheNode(node: Node): String {
+            val eid = node.elementId
+            nodeCache.putIfAbsent(eid, node)
+            return eid
+        }
     }
 
     // ------------------------------------------------------------------ //
@@ -82,8 +114,8 @@ class GrapeRankProcedures {
         else    -> 0.0
     }
 
-    private fun confidence(type: RelationshipType, observer: Node, source: Node): Double = when (type) {
-        FOLLOWS -> if (observer.elementId == source.elementId) 0.5 else 0.03
+    private fun confidence(type: RelationshipType, obsElementId: String, sourceElementId: String): Double = when (type) {
+        FOLLOWS -> if (obsElementId == sourceElementId) 0.5 else 0.03
         MUTES   -> 0.5
         REPORTS -> 0.5
         else    -> 0.0
@@ -97,47 +129,43 @@ class GrapeRankProcedures {
         1.0 - exp(-w * -ln(RIGOR))
 
     // ------------------------------------------------------------------ //
-    //  Core V3 algorithm (lazy-loads existing scores from node properties) //
+    //  Core V3 algorithm — single unified code path                       //
     // ------------------------------------------------------------------ //
 
     /**
-     * Recompute [target]'s score from [observer]'s perspective.
-     *
-     * Source scores are resolved from the [scores] cache first, falling
-     * back to the persisted `influence_{observer}` node property.  This
-     * avoids loading all scores up front.
+     * Recompute [target]'s score from the observer's perspective.
+     * Lazy-loads source scores from node properties on cache miss.
+     * Tracks changes relative to the stored (persisted) values.
      */
-    private fun recomputeScore(
-        observer: Node,
-        obsPubkey: String,
-        target: Node,
-        scores: MutableMap<String, Double>
-    ): Boolean {
-        if (observer.elementId == target.elementId) return false
+    private fun recomputeScore(ctx: ObserverContext, target: Node): Boolean {
+        val tid = ctx.cacheNode(target)
+        if (ctx.obsElementId == tid) return false
 
-        // Make sure the target's current stored score is in the cache
-        // so the delta check at the end is correct.
-        if (target.elementId !in scores) {
-            getStoredInfluence(target, obsPubkey)?.let {
-                scores[target.elementId] = it
+        // Ensure the target's stored score is in the cache so the
+        // convergence delta check compares against the right baseline.
+        if (tid !in ctx.scores) {
+            ctx.getStoredInfluence(target)?.let {
+                ctx.scores[tid] = it
+                ctx.priorStored.putIfAbsent(tid, it)
             }
         }
+        ctx.priorStored.putIfAbsent(tid, ctx.scores[tid] ?: 0.0)
 
         var weights = 0.0
         var ratings = 0.0
 
         for (edge in target.getRelationships(Direction.INCOMING, *SOCIAL_EDGES)) {
             val source = edge.startNode
-            val sid = source.elementId
+            val sid = ctx.cacheNode(source)
 
-            // Lazy-load: cache first, then node property
-            val sourceScore = scores[sid] ?: run {
-                val stored = getStoredInfluence(source, obsPubkey) ?: return@run null
-                scores[sid] = stored
+            val sourceScore = ctx.scores[sid] ?: run {
+                val stored = ctx.getStoredInfluence(source) ?: return@run null
+                ctx.scores[sid] = stored
+                ctx.priorStored.putIfAbsent(sid, stored)
                 stored
             } ?: continue
 
-            val conf = confidence(edge.type, observer, source)
+            val conf = confidence(edge.type, ctx.obsElementId, sid)
             val weight = conf * sourceScore * ATTENUATION
 
             weights += weight
@@ -150,16 +178,21 @@ class GrapeRankProcedures {
             (weightToConfidence(weights) * ratings / weights).coerceAtLeast(0.0)
         }
 
-        val oldScore = scores.put(target.elementId, newScore) ?: 0.0
+        val oldScore = ctx.scores.put(tid, newScore) ?: 0.0
+
+        // Track for persistence: differs from what's stored on disk?
+        // This is separate from convergence — a node with a tiny score
+        // (below CONVERGENCE_THRESHOLD) still needs to be persisted.
+        val prior = ctx.priorStored[tid] ?: 0.0
+        if (abs(newScore - prior) > 1e-10 || (prior == 0.0 && newScore > 1e-10)) {
+            ctx.changedNodes.add(tid)
+        }
+
+        // Convergence check: controls BFS propagation only.
         return abs(newScore - oldScore) > CONVERGENCE_THRESHOLD
     }
 
-    private fun propagateForward(
-        observer: Node,
-        obsPubkey: String,
-        target: Node,
-        scores: MutableMap<String, Double>
-    ) {
+    private fun propagateForward(ctx: ObserverContext, target: Node) {
         val queue = mutableSetOf<Node>()
         for (edge in target.getRelationships(Direction.OUTGOING, *SOCIAL_EDGES)) {
             queue.add(edge.endNode)
@@ -167,7 +200,7 @@ class GrapeRankProcedures {
         while (queue.isNotEmpty()) {
             val next = queue.first()
             queue.remove(next)
-            if (recomputeScore(observer, obsPubkey, next, scores)) {
+            if (recomputeScore(ctx, next)) {
                 for (edge in next.getRelationships(Direction.OUTGOING, *SOCIAL_EDGES)) {
                     queue.add(edge.endNode)
                 }
@@ -175,14 +208,9 @@ class GrapeRankProcedures {
         }
     }
 
-    private fun updateScores(
-        observer: Node,
-        obsPubkey: String,
-        target: Node,
-        scores: MutableMap<String, Double>
-    ) {
-        while (recomputeScore(observer, obsPubkey, target, scores)) {
-            propagateForward(observer, obsPubkey, target, scores)
+    private fun updateScores(ctx: ObserverContext, target: Node) {
+        while (recomputeScore(ctx, target)) {
+            propagateForward(ctx, target)
         }
     }
 
@@ -191,11 +219,10 @@ class GrapeRankProcedures {
     // ------------------------------------------------------------------ //
 
     /**
-     * BFS through FOLLOWS edges from [observer].  Returns the minimum
-     * hop distance for every node in [targetIds] that is reachable
-     * within 10 hops.
+     * Full BFS through FOLLOWS from observer.  Used by registerObserver
+     * where we need hops for every scored node anyway.
      */
-    private fun computeHops(
+    private fun computeHopsBFS(
         observer: Node,
         targetIds: Set<String>
     ): Map<String, Int> {
@@ -212,7 +239,7 @@ class GrapeRankProcedures {
         var frontier = listOf(observer)
         var depth = 0
 
-        while (frontier.isNotEmpty() && depth < 10 && remaining.isNotEmpty()) {
+        while (frontier.isNotEmpty() && depth < MAX_HOPS && remaining.isNotEmpty()) {
             depth++
             val next = mutableListOf<Node>()
             for (node in frontier) {
@@ -235,24 +262,61 @@ class GrapeRankProcedures {
         return result
     }
 
+    /**
+     * For incremental updates: compute hops only for [targetIds] by reading
+     * existing hops properties and only recomputing for truly new nodes.
+     * For nodes that already had a hops value, we keep it unless this is a
+     * FOLLOWS-edge change AND the node is directly downstream of the change
+     * (in which case we do a targeted per-node reverse walk).
+     */
+    private fun computeHopsIncremental(
+        ctx: ObserverContext,
+        targetIds: Set<String>,
+        isFollowChange: Boolean
+    ): Map<String, Int> {
+        val result = mutableMapOf<String, Int>()
+        val needCompute = mutableSetOf<String>()
+
+        for (tid in targetIds) {
+            if (tid == ctx.obsElementId) {
+                result[tid] = 0
+                continue
+            }
+            val node = ctx.nodeCache[tid] ?: tx!!.getNodeByElementId(tid)
+            if (!isFollowChange && node.hasProperty(ctx.hopProp)) {
+                // Mute/report change: hops can't change, keep stored value
+                result[tid] = (node.getProperty(ctx.hopProp) as Double).toInt()
+            } else if (node.hasProperty(ctx.hopProp)) {
+                // Follow change but node had a prior value — recompute
+                needCompute.add(tid)
+            } else {
+                // Brand new scored node — must compute
+                needCompute.add(tid)
+            }
+        }
+
+        if (needCompute.isEmpty()) return result
+
+        // BFS from observer to find these specific nodes
+        val found = computeHopsBFS(ctx.observer, needCompute)
+        result.putAll(found)
+
+        return result
+    }
+
     // ------------------------------------------------------------------ //
     //  Trusted reporters                                                  //
     // ------------------------------------------------------------------ //
 
-    /**
-     * Count incoming REPORTS edges whose source has
-     * influence > [CUTOFF_TRUSTED_REPORTER] from this observer.
-     */
     private fun computeTrustedReporters(
-        obsPubkey: String,
-        target: Node,
-        scores: Map<String, Double>
+        ctx: ObserverContext,
+        target: Node
     ): Int {
         var count = 0
         for (edge in target.getRelationships(Direction.INCOMING, REPORTS)) {
             val reporter = edge.startNode
-            val inf = scores[reporter.elementId]
-                ?: getStoredInfluence(reporter, obsPubkey)
+            val inf = ctx.scores[reporter.elementId]
+                ?: ctx.getStoredInfluence(reporter)
                 ?: 0.0
             if (inf > CUTOFF_TRUSTED_REPORTER) count++
         }
@@ -263,39 +327,31 @@ class GrapeRankProcedures {
     //  Persistence — write node properties in production format           //
     // ------------------------------------------------------------------ //
 
-    /**
-     * For every node whose score changed, write the three properties
-     * that the production system expects:
-     *
-     *   influence_{observer}, hops_{observer}, trusted_reporters_{observer}
-     */
     private fun persistScores(
-        observer: Node,
-        obsPubkey: String,
-        scores: Map<String, Double>,
+        ctx: ObserverContext,
         changedNodeIds: Set<String>,
         hops: Map<String, Int>
     ): List<ScoreResult> {
         val results = mutableListOf<ScoreResult>()
 
         for (nodeId in changedNodeIds) {
-            val newValue = scores[nodeId] ?: 0.0
-            val targetNode = tx!!.getNodeByElementId(nodeId)
+            val newValue = ctx.scores[nodeId] ?: 0.0
+            val targetNode = ctx.nodeCache[nodeId] ?: tx!!.getNodeByElementId(nodeId)
             val targetPubkey = targetNode.getProperty("pubkey") as String
 
             if (abs(newValue) < 1e-10) {
-                targetNode.removeProperty(influenceProp(obsPubkey))
-                targetNode.removeProperty(hopsProp(obsPubkey))
-                targetNode.removeProperty(trustedReportersProp(obsPubkey))
+                targetNode.removeProperty(ctx.infProp)
+                targetNode.removeProperty(ctx.hopProp)
+                targetNode.removeProperty(ctx.trProp)
             } else {
                 val h = (hops[nodeId] ?: 0).toDouble()
-                val tr = computeTrustedReporters(obsPubkey, targetNode, scores).toDouble()
+                val tr = computeTrustedReporters(ctx, targetNode).toDouble()
 
-                targetNode.setProperty(influenceProp(obsPubkey), newValue)
-                targetNode.setProperty(hopsProp(obsPubkey), h)
-                targetNode.setProperty(trustedReportersProp(obsPubkey), tr)
+                targetNode.setProperty(ctx.infProp, newValue)
+                targetNode.setProperty(ctx.hopProp, h)
+                targetNode.setProperty(ctx.trProp, tr)
 
-                results.add(ScoreResult(obsPubkey, targetPubkey, newValue))
+                results.add(ScoreResult(ctx.obsPubkey, targetPubkey, newValue))
             }
         }
 
@@ -306,13 +362,6 @@ class GrapeRankProcedures {
     //  Observer lookup                                                    //
     // ------------------------------------------------------------------ //
 
-    /**
-     * Find observers affected by a change at [sourceNode].
-     *
-     * An observer is affected only if they already have an
-     * `influence_{observer}` property on [sourceNode] — meaning the
-     * source is visible in their trust network.
-     */
     private fun findAffectedObservers(sourceNode: Node): List<Pair<Node, String>> {
         val observers = mutableListOf<Pair<Node, String>>()
 
@@ -320,7 +369,7 @@ class GrapeRankProcedures {
             while (iter.hasNext()) {
                 val obs = iter.next()
                 val pk = obs.getProperty("pubkey") as String
-                if (sourceNode.hasProperty(influenceProp(pk))) {
+                if (sourceNode.hasProperty("influence_$pk")) {
                     observers.add(obs to pk)
                 }
             }
@@ -349,139 +398,17 @@ class GrapeRankProcedures {
         val allResults = mutableListOf<ScoreResult>()
 
         for ((observer, obsPubkey) in affected) {
-            val scores = mutableMapOf(observer.elementId to 1.0)
+            val ctx = ObserverContext(observer, obsPubkey)
 
-            // Snapshot which nodes had scores before BFS,
-            // so we can detect what actually changed.
-            val priorValues = mutableMapOf<String, Double>()
+            updateScores(ctx, targetNode)
 
-            // Wrap recomputeScore to track changes
-            val changedNodes = mutableSetOf<String>()
+            if (ctx.changedNodes.isEmpty()) continue
 
-            // Run BFS; recomputeScore lazy-loads existing scores and
-            // puts new ones into `scores`. We detect changes by comparing.
-            updateScoresTracked(observer, obsPubkey, targetNode, scores, priorValues, changedNodes)
-
-            if (changedNodes.isEmpty()) continue
-
-            // Compute hops only for changed nodes, only if this is a FOLLOWS change
-            val hops = if (isFollowChange) {
-                computeHops(observer, changedNodes)
-            } else {
-                // For mute/report changes, read existing hops
-                val h = mutableMapOf<String, Int>()
-                for (nid in changedNodes) {
-                    val node = tx!!.getNodeByElementId(nid)
-                    val prop = hopsProp(obsPubkey)
-                    h[nid] = if (node.hasProperty(prop)) (node.getProperty(prop) as Double).toInt() else 0
-                }
-                h
-            }
-
-            allResults.addAll(persistScores(observer, obsPubkey, scores, changedNodes, hops))
+            val hops = computeHopsIncremental(ctx, ctx.changedNodes, isFollowChange)
+            allResults.addAll(persistScores(ctx, ctx.changedNodes, hops))
         }
 
         return allResults.stream()
-    }
-
-    /**
-     * Like [updateScores] but tracks which nodes actually changed
-     * by recording their prior values before overwrite.
-     */
-    private fun updateScoresTracked(
-        observer: Node,
-        obsPubkey: String,
-        target: Node,
-        scores: MutableMap<String, Double>,
-        priorValues: MutableMap<String, Double>,
-        changedNodes: MutableSet<String>
-    ) {
-        while (recomputeScoreTracked(observer, obsPubkey, target, scores, priorValues, changedNodes)) {
-            propagateForwardTracked(observer, obsPubkey, target, scores, priorValues, changedNodes)
-        }
-    }
-
-    private fun recomputeScoreTracked(
-        observer: Node,
-        obsPubkey: String,
-        target: Node,
-        scores: MutableMap<String, Double>,
-        priorValues: MutableMap<String, Double>,
-        changedNodes: MutableSet<String>
-    ): Boolean {
-        if (observer.elementId == target.elementId) return false
-        val tid = target.elementId
-
-        // Lazy-load the target's stored score into the cache
-        if (tid !in scores) {
-            val stored = getStoredInfluence(target, obsPubkey)
-            if (stored != null) {
-                scores[tid] = stored
-                priorValues.putIfAbsent(tid, stored)
-            }
-        }
-        priorValues.putIfAbsent(tid, scores[tid] ?: 0.0)
-
-        var weights = 0.0
-        var ratings = 0.0
-
-        for (edge in target.getRelationships(Direction.INCOMING, *SOCIAL_EDGES)) {
-            val source = edge.startNode
-            val sid = source.elementId
-
-            val sourceScore = scores[sid] ?: run {
-                val stored = getStoredInfluence(source, obsPubkey) ?: return@run null
-                scores[sid] = stored
-                priorValues.putIfAbsent(sid, stored)
-                stored
-            } ?: continue
-
-            val conf = confidence(edge.type, observer, source)
-            val weight = conf * sourceScore * ATTENUATION
-
-            weights += weight
-            ratings += weight * rating(edge.type)
-        }
-
-        val newScore = if (abs(weights) < MINIMUM_WEIGHT) {
-            0.0
-        } else {
-            (weightToConfidence(weights) * ratings / weights).coerceAtLeast(0.0)
-        }
-
-        val oldScore = scores.put(tid, newScore) ?: 0.0
-        val changed = abs(newScore - oldScore) > CONVERGENCE_THRESHOLD
-        if (changed) {
-            // Track as changed relative to the STORED value (not just the cache)
-            val prior = priorValues[tid] ?: 0.0
-            if (abs(newScore - prior) > 1e-10 || (prior == 0.0 && newScore > 1e-10)) {
-                changedNodes.add(tid)
-            }
-        }
-        return changed
-    }
-
-    private fun propagateForwardTracked(
-        observer: Node,
-        obsPubkey: String,
-        target: Node,
-        scores: MutableMap<String, Double>,
-        priorValues: MutableMap<String, Double>,
-        changedNodes: MutableSet<String>
-    ) {
-        val queue = mutableSetOf<Node>()
-        for (edge in target.getRelationships(Direction.OUTGOING, *SOCIAL_EDGES)) {
-            queue.add(edge.endNode)
-        }
-        while (queue.isNotEmpty()) {
-            val next = queue.first()
-            queue.remove(next)
-            if (recomputeScoreTracked(observer, obsPubkey, next, scores, priorValues, changedNodes)) {
-                for (edge in next.getRelationships(Direction.OUTGOING, *SOCIAL_EDGES)) {
-                    queue.add(edge.endNode)
-                }
-            }
-        }
     }
 
     // ------------------------------------------------------------------ //
@@ -533,22 +460,25 @@ class GrapeRankProcedures {
 
         observer.addLabel(GRAPERANK_OBSERVER)
 
+        val ctx = ObserverContext(observer, pubkey)
+
         // Self-score
-        observer.setProperty(influenceProp(pubkey), 1.0)
-        observer.setProperty(hopsProp(pubkey), 0.0)
-        observer.setProperty(trustedReportersProp(pubkey), 0.0)
+        observer.setProperty(ctx.infProp, 1.0)
+        observer.setProperty(ctx.hopProp, 0.0)
+        observer.setProperty(ctx.trProp, 0.0)
 
-        val scores = mutableMapOf(observer.elementId to 1.0)
-        propagateForward(observer, pubkey, observer, scores)
+        propagateForward(ctx, observer)
 
-        // Collect all scored nodes (exclude observer)
-        val scoredNodeIds = scores.keys.filter { it != observer.elementId && (scores[it] ?: 0.0) > 1e-10 }.toSet()
+        // Every node with a non-zero score that differs from stored is "changed"
+        val scoredNodeIds = ctx.changedNodes
+            .filter { it != ctx.obsElementId && (ctx.scores[it] ?: 0.0) > 1e-10 }
+            .toSet()
 
         if (scoredNodeIds.isEmpty()) return Stream.empty()
 
-        val hops = computeHops(observer, scoredNodeIds)
+        val hops = computeHopsBFS(observer, scoredNodeIds)
 
-        return persistScores(observer, pubkey, scores, scoredNodeIds, hops).stream()
+        return persistScores(ctx, scoredNodeIds, hops).stream()
     }
 
     @Procedure("graperank.v3.getScores", mode = Mode.READ)
@@ -559,16 +489,14 @@ class GrapeRankProcedures {
         val observer = tx!!.findNode(NOSTR_USER, "pubkey", pubkey)
             ?: return Stream.empty()
 
-        val prefix = "influence_$pubkey"
+        val infProp = "influence_$pubkey"
         val results = mutableListOf<ScoreResult>()
 
-        // Scan all NostrUser nodes for the observer's influence property.
-        // This is O(nodes) but getScores is a read-only query, not a hot path.
         tx!!.findNodes(NOSTR_USER).use { iter ->
             while (iter.hasNext()) {
                 val node = iter.next()
-                if (node.hasProperty(prefix)) {
-                    val score = node.getProperty(prefix) as Double
+                if (node.hasProperty(infProp)) {
+                    val score = node.getProperty(infProp) as Double
                     if (score > 1e-10) {
                         results.add(
                             ScoreResult(
