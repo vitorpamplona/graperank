@@ -7,11 +7,20 @@ plugin. Once the JAR is deployed to your Neo4j instance, every follow / mute /
 report event can trigger an incremental score recomputation **inside the
 database**, with zero network overhead and JVM-speed math.
 
-Scores are persisted as relationships in the graph itself:
+Scores are stored as **properties on NostrUser nodes**, matching the production
+format used by `brainstorm_server/write_neo4j_results.py`:
 
 ```
-(:GrapeRankObserver)-[:GRAPERANK_SCORE {value: 0.255}]->(:NostrUser)
+(:NostrUser {
+    pubkey: "bob_hex",
+    influence_<observer_pubkey>: 0.255,
+    hops_<observer_pubkey>: 1.0,
+    trusted_reporters_<observer_pubkey>: 0.0
+})
 ```
+
+This means existing code that reads `influence_{observer}` properties continues
+to work unchanged.
 
 ## Building the JAR
 
@@ -69,9 +78,10 @@ one-time operation per user:
 CALL graperank.v3.registerObserver('pubkey_hex')
 ```
 
-This walks the observer's entire reachable trust graph and creates all initial
-`GRAPERANK_SCORE` relationships. It can take a few seconds for well-connected
-users; after that, incremental updates are near-instant.
+This walks the observer's entire reachable trust graph and writes
+`influence_X`, `hops_X`, and `trusted_reporters_X` properties on every
+reachable NostrUser node. It can take a few seconds for well-connected users;
+after that, incremental updates are near-instant.
 
 ## Integrating with `process_strfry_event.py`
 
@@ -332,16 +342,31 @@ follow of `bob`. The `findAffectedObservers` check skips them entirely, turning
 an O(observers) operation into O(affected_observers) — typically 1-5 instead of
 hundreds.
 
-### Score storage model
+### Score storage — production parity
+
+Scores are stored as **dynamic properties on NostrUser nodes**, exactly matching
+the format written by `brainstorm_server/write_neo4j_results.py`:
 
 ```
-(:GrapeRankObserver:NostrUser)-[:GRAPERANK_SCORE {value: Double}]->(:NostrUser)
+SET n.influence_{observer}         = <V3 score>
+SET n.hops_{observer}              = <shortest FOLLOWS distance from observer>
+SET n.trusted_reporters_{observer} = <# reporters with influence > 0.1>
 ```
 
-- The `:GrapeRankObserver` label marks registered observers (fast filter)
-- Each score is one relationship; querying all scores for an observer is a
-  single relationship traversal
-- Scores below 1e-10 are deleted rather than stored (keeps the graph clean)
+The `influence` value is the V3 GrapeRank score (same formula: weighted
+aggregation with 0.85 attenuation, weight-to-confidence transform, iterative
+convergence).
+
+`hops` is computed via BFS through FOLLOWS edges from the observer (separate
+from the score BFS). It is recomputed when FOLLOWS edges change but left
+unchanged for MUTE/REPORT events.
+
+`trusted_reporters` counts incoming REPORTS edges from users whose own
+`influence` score (from this observer's perspective) exceeds 0.1
+(`DEFAULT_CUTOFF_OF_TRUSTED_REPORTER` in Constants.java).
+
+The `:GrapeRankObserver` label marks registered observers. It is used
+internally to enumerate observers for the affected-observer check.
 
 ## Available procedures
 
