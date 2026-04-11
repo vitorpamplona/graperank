@@ -15,8 +15,7 @@ repositories {
 val neo4jVersion = "5.26.0"
 
 dependencies {
-    // quartz is only used by BrainstormStressTest — uncomment when available locally
-    // testImplementation("com.vitorpamplona.quartz:quartz:1.05.0-SNAPSHOT")
+    implementation("com.vitorpamplona.quartz:quartz:1.05.0-SNAPSHOT")
 
     // Neo4j procedure API (provided by Neo4j at runtime)
     compileOnly("org.neo4j:neo4j:$neo4jVersion")
@@ -38,13 +37,6 @@ tasks.shadowJar {
 
 tasks.test {
     useJUnitPlatform()
-}
-
-// Exclude stress tests that require quartz (local SNAPSHOT) when it's unavailable
-sourceSets.test {
-    kotlin {
-        exclude("**/BrainstormStressTest.kt")
-    }
 }
 kotlin {
     compilerOptions {
