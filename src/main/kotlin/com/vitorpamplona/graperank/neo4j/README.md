@@ -306,6 +306,111 @@ async def process_event_kind_10000(session, event):
         )
 ```
 
+## What happens when Alice follows Bob
+
+A concrete walkthrough of `CALL graperank.v3.onFollow('alice', 'bob')`:
+
+```
+1. FIND AFFECTED OBSERVERS
+   │
+   │  Scan all :GrapeRankObserver nodes.  For each observer O,
+   │  check: does the Alice node have an influence_{O} property?
+   │
+   │  If yes → O has already scored Alice → this follow can change
+   │           O's scores → O is affected.
+   │  If no  → O has never heard of Alice → skip.
+   │
+   │  Typical result: 1–5 affected observers out of hundreds.
+   │
+   ▼
+2. FOR EACH AFFECTED OBSERVER O:
+   │
+   │  Create an ObserverContext (caches O's pubkey, property names,
+   │  score map starting with {O: 1.0}, node references).
+   │
+   ▼
+3. RECOMPUTE BOB'S SCORE (from O's perspective)
+   │
+   │  Read Bob's incoming edges (FOLLOWS / MUTES / REPORTS).
+   │  For each source of an incoming edge:
+   │
+   │    score = cache[source] or read influence_{O} from source node
+   │    if no score → skip (source invisible to O)
+   │
+   │    weight = confidence × score × 0.85 (attenuation)
+   │      confidence = 0.5  if source IS the observer (direct)
+   │                   0.03 if source is someone else  (transitive)
+   │                   0.5  for MUTES / REPORTS edges
+   │
+   │  Aggregate:
+   │    sumWeights = Σ weight
+   │    sumRatings = Σ weight × rating    (+1 follow, −0.1 mute/report)
+   │
+   │  New score = weightToConfidence(sumWeights) × sumRatings / sumWeights
+   │            = (1 − 2^(−sumWeights)) × (sumRatings / sumWeights)
+   │            clamped to ≥ 0
+   │
+   │  Example: O follows Alice, Alice follows Bob (new edge).
+   │    Alice's score from O = 0.255
+   │    weight = 0.03 × 0.255 × 0.85 = 0.0065
+   │    confidence(0.0065) = 1 − 2^(−0.0065) ≈ 0.0045
+   │    Bob's score = 0.0045
+   │
+   ▼
+4. DID BOB'S SCORE CHANGE?
+   │
+   │  Compare against the PREVIOUS iteration's value (convergence check):
+   │    |new − old| > 0.0001?  →  yes: propagate forward
+   │                              no:  stop (converged)
+   │
+   │  Separately, compare against what's STORED in Neo4j (persistence check):
+   │    |new − stored| > 1e-10?  →  yes: mark Bob for writing
+   │
+   │  The convergence check controls the BFS walk.
+   │  The persistence check controls what gets written.
+   │  A tiny score (7.9e-5 at hop 3) may be persisted even though
+   │  the BFS doesn't propagate past it.
+   │
+   ▼
+5. PROPAGATE FORWARD (BFS)
+   │
+   │  If Bob's score changed (convergence check):
+   │    Add Bob's outgoing edge targets to a queue.
+   │    For each queued node, go back to step 3.
+   │    Only keep walking paths where scores actually change.
+   │
+   │  The queue is a Set, so cycles (A→B→C→A) are deduplicated.
+   │  Signal decays ~100× per hop (0.03 × 0.85), so the BFS
+   │  naturally stops after 3–4 hops.
+   │
+   │  Outer loop: after the BFS drains, recheck Bob's own score.
+   │  If a cycle fed back into Bob and changed it, BFS again.
+   │  Repeats until Bob's score stabilises.
+   │
+   ▼
+6. COMPUTE HOPS (for changed nodes only)
+   │
+   │  BFS from O through FOLLOWS edges.
+   │  Record the shortest distance to each changed node.
+   │  Stops once all targets are found or depth 10.
+   │
+   ▼
+7. WRITE TO NEO4J
+   │
+   │  For each changed node N:
+   │    N.influence_{O}         = new score
+   │    N.hops_{O}              = shortest FOLLOWS distance
+   │    N.trusted_reporters_{O} = count of N's reporters with influence > 0.1
+   │
+   │  If score dropped to ≈0, remove all three properties instead.
+   │
+   ▼
+8. RETURN changed scores as {observer, target, score} rows.
+```
+
+For a typical incremental follow, steps 3–5 touch **5–20 nodes**. The
+entire procedure completes in milliseconds.
+
 ## Why it works this way
 
 ### Why stored procedures instead of Cypher?
